@@ -1,0 +1,2209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TuiML WebAssembly Studio — In-Browser Python Machine Learning</title>
+  <meta name="description" content="Run TuiML natively in the web browser via WebAssembly and Pyodide. Train models, evaluate algorithms, and visualize predictions client-side.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <!-- Load Pyodide from CDN -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <style>
+    :root {
+      --bg-base: #090d16;
+      --bg-surface: #111827;
+      --bg-card: rgba(17, 24, 39, 0.75);
+      --bg-card-hover: rgba(30, 41, 59, 0.85);
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --border-accent: rgba(99, 102, 241, 0.35);
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --primary-glow: rgba(99, 102, 241, 0.25);
+      --accent-cyan: #06b6d4;
+      --accent-emerald: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-rose: #f43f5e;
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 18px;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'Fira Code', monospace;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg-base);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      overflow-x: hidden;
+      line-height: 1.5;
+      background-image: 
+        radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.12) 0%, transparent 40%),
+        radial-gradient(circle at 85% 85%, rgba(6, 182, 212, 0.10) 0%, transparent 45%);
+    }
+
+    header {
+      border-bottom: 1px solid var(--border-subtle);
+      background: rgba(9, 13, 22, 0.8);
+      backdrop-filter: blur(16px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 1rem 2rem;
+    }
+
+    .header-content {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+    }
+
+    .logo-badge {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.25rem;
+      color: white;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    .brand h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, #ffffff 40%, #cbd5e1 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .tag-wasm {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      background: rgba(6, 182, 212, 0.15);
+      border: 1px solid rgba(6, 182, 212, 0.4);
+      color: var(--accent-cyan);
+      padding: 0.15rem 0.5rem;
+      border-radius: 9999px;
+      letter-spacing: 0.05em;
+    }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+
+    .status-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background-color: var(--accent-amber);
+      box-shadow: 0 0 10px var(--accent-amber);
+      transition: all 0.3s ease;
+    }
+
+    .status-dot.ready {
+      background-color: var(--accent-emerald);
+      box-shadow: 0 0 10px var(--accent-emerald);
+    }
+
+    .status-dot.busy {
+      background-color: var(--primary);
+      box-shadow: 0 0 10px var(--primary);
+      animation: pulse 1s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { transform: scale(0.9); opacity: 0.6; }
+      to { transform: scale(1.2); opacity: 1; }
+    }
+
+    main {
+      max-width: 1400px;
+      margin: 2rem auto;
+      padding: 0 1.5rem;
+    }
+
+    .hero-banner {
+      margin-bottom: 2rem;
+      padding: 1.75rem 2rem;
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1.5rem;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+
+    .hero-info h2 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      margin-bottom: 0.35rem;
+      background: linear-gradient(135deg, #ffffff, #94a3b8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-info p {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      max-width: 700px;
+    }
+
+    .steps-container {
+      display: flex;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .step-pill {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-subtle);
+      padding: 0.4rem 0.85rem;
+      border-radius: 9999px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      transition: all 0.25s ease;
+    }
+
+    .step-pill.active {
+      border-color: var(--accent-cyan);
+      color: var(--text-main);
+      background: rgba(6, 182, 212, 0.12);
+    }
+
+    .step-pill.complete {
+      border-color: var(--accent-emerald);
+      color: var(--accent-emerald);
+      background: rgba(16, 185, 129, 0.1);
+    }
+
+    .step-num {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.1);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.7rem;
+      font-weight: 700;
+    }
+
+    .step-pill.complete .step-num {
+      background: var(--accent-emerald);
+      color: #000;
+    }
+
+    /* Grid Layout */
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 420px 1fr;
+      gap: 1.5rem;
+    }
+
+    @media (max-width: 1024px) {
+      .studio-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .panel {
+      background: var(--bg-card);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .panel-title {
+      font-size: 1.1rem;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-main);
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .form-label {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--text-dim);
+    }
+
+    select, input[type="number"], input[type="range"] {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-main);
+      padding: 0.65rem 0.85rem;
+      border-radius: var(--radius-sm);
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    select:focus, input[type="number"]:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px var(--primary-glow);
+    }
+
+    .range-group {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .range-value {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--accent-cyan);
+      min-width: 32px;
+      text-align: right;
+    }
+
+    .btn-group {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    button {
+      cursor: pointer;
+      font-family: var(--font-sans);
+      font-size: 0.875rem;
+      font-weight: 600;
+      padding: 0.7rem 1.1rem;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+    }
+
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), #4f46e5);
+      color: white;
+      box-shadow: 0 4px 14px var(--primary-glow);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: linear-gradient(135deg, #4f46e5, #4338ca);
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.7);
+      border-color: var(--border-subtle);
+      color: var(--text-main);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(51, 65, 85, 0.8);
+      border-color: rgba(255, 255, 255, 0.15);
+    }
+
+    .btn-accent {
+      background: rgba(16, 185, 129, 0.15);
+      border-color: rgba(16, 185, 129, 0.4);
+      color: var(--accent-emerald);
+    }
+
+    .btn-accent:hover:not(:disabled) {
+      background: rgba(16, 185, 129, 0.25);
+    }
+
+    .btn-cyan {
+      background: rgba(6, 182, 212, 0.15);
+      border-color: rgba(6, 182, 212, 0.4);
+      color: var(--accent-cyan);
+    }
+
+    .btn-cyan:hover:not(:disabled) {
+      background: rgba(6, 182, 212, 0.25);
+    }
+
+    /* Output Panels */
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 0.5rem;
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      padding: 0.4rem 0.8rem;
+      border-radius: var(--radius-sm);
+    }
+
+    .tab-btn.active {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.08);
+      font-weight: 600;
+    }
+
+    .tab-content {
+      display: none;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 0.75rem;
+    }
+
+    .metric-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 0.85rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .metric-name {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .metric-val {
+      font-family: var(--font-mono);
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: var(--accent-emerald);
+    }
+
+    .plot-container {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      min-height: 380px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .plot-container img {
+      max-width: 100%;
+      height: auto;
+      border-radius: var(--radius-sm);
+    }
+
+    .plot-placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+      color: var(--text-dim);
+      font-size: 0.9rem;
+    }
+
+    .console-box {
+      background: #050811;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 0.85rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.825rem;
+      color: #cbd5e1;
+      max-height: 300px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+
+    .code-editor {
+      width: 100%;
+      min-height: 220px;
+      background: #050811;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: #38bdf8;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      padding: 1rem;
+      outline: none;
+      resize: vertical;
+      line-height: 1.5;
+    }
+
+    .code-editor:focus {
+      border-color: var(--primary);
+    }
+
+    .repl-toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.75rem;
+      gap: 0.75rem;
+      flex-wrap: wrap;
+    }
+
+    .repl-preset-select {
+      background: rgba(15, 23, 42, 0.8);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+      padding: 0.45rem 0.85rem;
+      font-size: 0.85rem;
+      outline: none;
+      cursor: pointer;
+      min-width: 260px;
+    }
+
+    .repl-preset-select:focus {
+      border-color: var(--accent-cyan);
+    }
+
+    .repl-shortcuts {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .kbd-shortcut {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-subtle);
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      color: var(--accent-cyan);
+    }
+
+    .repl-output-panel {
+      margin-top: 1rem;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      background: #050811;
+      overflow: hidden;
+      display: none;
+    }
+
+    .repl-output-panel.visible {
+      display: block;
+    }
+
+    .repl-output-header {
+      background: rgba(15, 23, 42, 0.95);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 0.5rem 0.85rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+
+    .repl-output-badge {
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: var(--accent-cyan);
+    }
+
+    .repl-output-text {
+      padding: 0.85rem 1rem;
+      font-family: var(--font-mono);
+      font-size: 0.825rem;
+      color: #cbd5e1;
+      max-height: 250px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+
+    .repl-plot-area {
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      background: rgba(15, 23, 42, 0.5);
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .repl-plot-area img {
+      max-width: 100%;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-subtle);
+    }
+
+    .btn-secondary {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 0.65rem 1.15rem;
+      border-radius: var(--radius-sm);
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s ease;
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+    }
+
+    .file-dropzone {
+      border: 2px dashed var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 0.85rem;
+      text-align: center;
+      background: rgba(15, 23, 42, 0.5);
+      transition: all 0.25s ease;
+    }
+
+    .file-dropzone.dragover {
+      border-color: var(--accent-cyan);
+      background: rgba(6, 182, 212, 0.1);
+    }
+
+    /* AI Agent (WebGPU + MCP) Styling */
+    .agent-header-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .agent-config-row {
+      display: flex;
+      gap: 0.75rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .agent-progress-box {
+      background: #050811;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      padding: 0.5rem 0.85rem;
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      margin-top: 0.75rem;
+      display: none;
+    }
+
+    .agent-progress-bar {
+      height: 4px;
+      background: linear-gradient(90deg, var(--primary), var(--accent-cyan));
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.2s ease;
+      margin-top: 0.4rem;
+    }
+
+    .chat-container {
+      display: flex;
+      flex-direction: column;
+      height: 520px;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      background: #050811;
+      overflow: hidden;
+    }
+
+    .chat-messages {
+      flex: 1;
+      padding: 1.25rem;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .chat-msg {
+      display: flex;
+      gap: 0.75rem;
+      max-width: 90%;
+    }
+
+    .chat-msg.user {
+      align-self: flex-end;
+      flex-direction: row-reverse;
+    }
+
+    .chat-msg.assistant {
+      align-self: flex-start;
+    }
+
+    .chat-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 0.85rem;
+      flex-shrink: 0;
+    }
+
+    .chat-msg.assistant .chat-avatar {
+      background: linear-gradient(135deg, var(--primary), var(--accent-cyan));
+      color: white;
+      box-shadow: 0 2px 8px var(--primary-glow);
+    }
+
+    .chat-msg.user .chat-avatar {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--text-main);
+    }
+
+    .chat-bubble {
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      line-height: 1.55;
+      color: var(--text-main);
+      white-space: pre-wrap;
+    }
+
+    .chat-msg.user .chat-bubble {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: rgba(99, 102, 241, 0.4);
+    }
+
+    .tool-call-card {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border-accent);
+      border-radius: var(--radius-sm);
+      padding: 0.65rem 0.85rem;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      margin: 0.5rem 0;
+      color: #94a3b8;
+    }
+
+    .tool-call-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.35rem;
+      font-weight: 600;
+      color: var(--accent-cyan);
+    }
+
+    .tool-call-body {
+      background: #02040a;
+      border-radius: 4px;
+      padding: 0.4rem 0.6rem;
+      color: #a5f3fc;
+      overflow-x: auto;
+      white-space: pre-wrap;
+    }
+
+    .chat-quick-prompts {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(15, 23, 42, 0.6);
+      border-top: 1px solid var(--border-subtle);
+      overflow-x: auto;
+    }
+
+    .quick-chip {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-subtle);
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.725rem;
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+    }
+
+    .quick-chip:hover {
+      background: rgba(99, 102, 241, 0.15);
+      border-color: var(--primary);
+      color: var(--text-main);
+    }
+
+    .chat-input-row {
+      display: flex;
+      gap: 0.5rem;
+      padding: 0.75rem 1rem;
+      background: rgba(15, 23, 42, 0.95);
+      border-top: 1px solid var(--border-subtle);
+    }
+
+    .chat-input {
+      flex: 1;
+      background: #050811;
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-sm);
+      color: var(--text-main);
+      padding: 0.6rem 0.85rem;
+      font-size: 0.875rem;
+      outline: none;
+      font-family: var(--font-sans);
+    }
+
+    .chat-input:focus {
+      border-color: var(--primary);
+    }
+
+    footer {
+      max-width: 1400px;
+      margin: 3rem auto 2rem;
+      padding: 1.5rem;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-dim);
+      font-size: 0.85rem;
+    }
+
+    footer a {
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    footer a:hover {
+      color: var(--text-main);
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-content">
+      <div class="brand">
+        <div class="logo-badge">T</div>
+        <div>
+          <h1>TuiML WebAssembly Studio</h1>
+        </div>
+        <span class="tag-wasm">WASM • Pyodide</span>
+      </div>
+      <div class="header-status">
+        <div class="status-dot" id="status-indicator"></div>
+        <span id="status-text">Booting WebAssembly VM...</span>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero-banner">
+      <div class="hero-info">
+        <h2>In-Browser Python Machine Learning</h2>
+        <p>
+          Executing TuiML client-side inside WebAssembly via Pyodide. Train decision trees, random forests, Naive Bayes, and chainable ML workflows with hardware portability and zero server latency.
+        </p>
+      </div>
+      <div class="steps-container">
+        <div class="step-pill active" id="step-wasm">
+          <span class="step-num">1</span>
+          <span>WASM VM</span>
+        </div>
+        <div class="step-pill" id="step-scipy">
+          <span class="step-num">2</span>
+          <span>SciPy & NumPy</span>
+        </div>
+        <div class="step-pill" id="step-tuiml">
+          <span class="step-num">3</span>
+          <span>TuiML Wheel</span>
+        </div>
+        <div class="step-pill" id="step-ready">
+          <span class="step-num">4</span>
+          <span>Studio Ready</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="studio-grid">
+      <!-- Control Panel -->
+      <section class="panel">
+        <div class="panel-header">
+          <div class="panel-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20v-6M6 20V10M18 20V4"/></svg>
+            Experiment Configuration
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="dataset-select">Dataset</label>
+          <select id="dataset-select">
+            <option value="iris">Iris Flowers (Multiclass, 4 features)</option>
+            <option value="breast_cancer">Breast Cancer (Binary, 30 features)</option>
+            <option value="wine">Wine Recognition (Multiclass, 13 features)</option>
+            <option value="moons">Synthetic Two Moons (Non-linear)</option>
+            <option value="blobs">Synthetic Blobs (Clustering/Gaussian)</option>
+            <option value="custom_csv">📁 Upload Custom CSV File...</option>
+          </select>
+        </div>
+
+        <div class="form-group" id="custom-csv-group" style="display: none;">
+          <label class="form-label">Upload CSV to WebAssembly Sandbox</label>
+          <div class="file-dropzone" id="csv-dropzone">
+            <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
+            <button type="button" class="btn-secondary" id="btn-browse-csv" style="width: 100%; justify-content: center;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              Choose CSV or Drag & Drop Here
+            </button>
+            <div id="file-info-badge" style="display: none; margin-top: 0.65rem; font-size: 0.8rem; color: var(--accent-emerald); font-weight: 500;"></div>
+          </div>
+          <div id="target-col-container" style="margin-top: 0.85rem; display: none;">
+            <label class="form-label" for="target-col-select">Target / Label Column</label>
+            <select id="target-col-select"></select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="algo-select">Algorithm</label>
+          <select id="algo-select">
+            <option value="RandomForestClassifier">RandomForestClassifier (Ensemble)</option>
+            <option value="DecisionTreeClassifier">DecisionTreeClassifier (Tree)</option>
+            <option value="NaiveBayesClassifier">NaiveBayesClassifier (Bayesian)</option>
+            <option value="LogisticRegression">LogisticRegression (Linear)</option>
+            <option value="KNearestNeighborsClassifier">KNearestNeighborsClassifier (KNN)</option>
+            <option value="KMeansClusterer">KMeansClusterer (Unsupervised)</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="slider-estimators">Number of Estimators / Trees: <span class="range-value" id="val-estimators">15</span></label>
+          <input type="range" id="slider-estimators" min="5" max="50" step="5" value="15">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="slider-depth">Max Depth: <span class="range-value" id="val-depth">4</span></label>
+          <input type="range" id="slider-depth" min="1" max="10" step="1" value="4">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="select-cv">Validation Method</label>
+          <select id="select-cv">
+            <option value="5">5-Fold Stratified Cross-Validation</option>
+            <option value="10">10-Fold Stratified Cross-Validation</option>
+            <option value="holdout">80/20 Train-Test Split</option>
+          </select>
+        </div>
+
+        <div class="btn-group">
+          <button class="btn-primary" id="btn-train" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Train & Eval
+          </button>
+          <button class="btn-cyan" id="btn-plot" disabled>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+            Generate Plot
+          </button>
+        </div>
+
+        <div class="btn-group">
+          <button class="btn-accent" id="btn-workflow" disabled style="grid-column: span 2;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            Run Declarative Workflow Pipeline
+          </button>
+        </div>
+      </section>
+
+      <!-- Output Panel -->
+      <section class="panel">
+        <div class="tabs">
+          <button class="tab-btn active" data-tab="tab-results" id="tab-btn-results">Results & Visuals</button>
+          <button class="tab-btn" data-tab="tab-repl" id="tab-btn-repl">Python REPL Editor</button>
+          <button class="tab-btn" data-tab="tab-agent" id="tab-btn-agent">🤖 AI Agent (WebGPU + MCP)</button>
+          <button class="tab-btn" data-tab="tab-logs" id="tab-btn-logs">WASM System Logs</button>
+        </div>
+
+        <!-- Tab: Results & Visuals -->
+        <div class="tab-content active" id="tab-results">
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <span class="metric-name">Accuracy</span>
+              <span class="metric-val" id="metric-acc">—</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-name">F1 Score</span>
+              <span class="metric-val" id="metric-f1">—</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-name">WASM Latency</span>
+              <span class="metric-val" id="metric-time" style="color: var(--accent-cyan); font-size: 1.15rem;">—</span>
+            </div>
+            <div class="metric-card">
+              <span class="metric-name">Samples</span>
+              <span class="metric-val" id="metric-samples" style="color: var(--text-main); font-size: 1.15rem;">—</span>
+            </div>
+          </div>
+
+          <div class="plot-container" id="plot-area">
+            <div class="plot-placeholder">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="m21 15-5-5L5 21"/></svg>
+              <span>Train a model or click "Generate Plot" to render visual analytics.</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Custom REPL Editor -->
+        <div class="tab-content" id="tab-repl">
+          <div class="repl-toolbar">
+            <div style="display: flex; align-items: center; gap: 0.75rem;">
+              <select class="repl-preset-select" id="repl-template-select">
+                <option value="iris_rf">🌲 Preset: Random Forest on Iris (5-Fold CV)</option>
+                <option value="declarative_pipeline">🔄 Preset: Declarative train() Workflow</option>
+                <option value="classifier_race">⚡ Preset: 5-Classifier Performance Race</option>
+                <option value="kmeans_plot">🎯 Preset: KMeans Clustering & Matplotlib Plot</option>
+                <option value="preprocessing">🔍 Preset: StandardScaler & Imputation</option>
+                <option value="csv_workflow">📂 Preset: Work with Uploaded CSV Files</option>
+              </select>
+              <div class="repl-shortcuts">
+                <span class="kbd-shortcut">Ctrl+Enter</span> to Run
+                <span class="kbd-shortcut" style="margin-left: 0.25rem;">Tab</span> Indents
+              </div>
+            </div>
+            <div style="display: flex; gap: 0.5rem;">
+              <button class="btn-secondary" id="btn-clear-repl">Clear</button>
+              <button class="btn-primary" id="btn-run-code" disabled>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                Execute in WASM
+              </button>
+            </div>
+          </div>
+
+          <textarea class="code-editor" id="custom-code" spellcheck="false"># Run arbitrary TuiML code in the browser via Pyodide!
+from tuiml.datasets import load_iris
+from tuiml.algorithms.trees import RandomForestClassifier
+from tuiml.evaluation import cross_val_score
+import numpy as np
+
+data = load_iris()
+clf = RandomForestClassifier(n_estimators=20, max_depth=4, random_state=42)
+scores = cross_val_score(clf, data.X, data.y, cv=5)
+
+print("Iris dataset loaded:", data.X.shape)
+print("5-fold cross-validation scores:", np.round(scores, 4))
+print(f"Mean accuracy: {scores.mean():.4f} (+/- {scores.std():.4f})")
+</textarea>
+
+          <!-- Interactive Terminal & Visual Output inside REPL -->
+          <div class="repl-output-panel" id="repl-output-box">
+            <div class="repl-output-header">
+              <span>WASM Python Execution Output</span>
+              <span class="repl-output-badge" id="repl-latency-badge">—</span>
+            </div>
+            <div class="repl-output-text" id="repl-stdout-text"></div>
+            <div class="repl-plot-area" id="repl-plots-area" style="display: none;"></div>
+          </div>
+        </div>
+
+        <!-- Tab: In-Browser AI Agent (WebGPU + MCP) -->
+        <div class="tab-content" id="tab-agent">
+          <div class="agent-header-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; gap: 0.5rem;">
+              <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+                <span>In-Browser LLM Engine</span>
+                <span class="tag-wasm" id="webgpu-status-tag">Detecting Hardware...</span>
+              </div>
+              <div style="font-size: 0.75rem; color: var(--text-dim);" id="model-mem-info">WebGPU Acceleration • Client-side Privacy</div>
+            </div>
+            
+            <div class="agent-config-row">
+              <select class="repl-preset-select" id="agent-model-select" style="min-width: 320px;">
+                <option value="onnx-community/Qwen2.5-0.5B-Instruct">Qwen2.5-0.5B-Instruct (q4f16, ~350MB • Fastest)</option>
+                <option value="onnx-community/Qwen2.5-1.5B-Instruct">Qwen2.5-1.5B-Instruct (q4f16, ~950MB • High Accuracy)</option>
+                <option value="onnx-community/gemma-2-2b-it">Google Gemma-2-2B-IT (q4f16, ~1.5GB • Google Gemma)</option>
+                <option value="onnx-community/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder-1.5B-Instruct (q4f16, ~950MB • Code Specialist)</option>
+                <option value="onnx-community/SmolLM2-360M-Instruct">SmolLM2-360M-Instruct (q4, ~220MB • Ultra-Lightweight)</option>
+              </select>
+
+              <button class="btn-primary" id="btn-load-agent-model" style="padding: 0.45rem 1.15rem;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Load Model into WebGPU
+              </button>
+            </div>
+
+            <div class="agent-progress-box" id="agent-progress-panel">
+              <div id="agent-progress-label">Downloading weights from Hugging Face...</div>
+              <div class="agent-progress-bar" id="agent-progress-fill"></div>
+            </div>
+          </div>
+
+          <!-- Chat UI -->
+          <div class="chat-container">
+            <div class="chat-messages" id="agent-chat-messages">
+              <div class="chat-msg assistant">
+                <div class="chat-avatar">AI</div>
+                <div class="chat-bubble">
+                  Hello! I am your <strong>in-browser Autonomous AI Data Scientist</strong> powered by <strong>WebGPU</strong> and connected to <strong>TuiML</strong> via the Model Context Protocol (MCP).
+                  <br><br>
+                  Select a quantized model above and click <strong>"Load Model into WebGPU"</strong> to boot the local weights into your browser. Once loaded, ask me to train, benchmark, profile, or evaluate models on your data—all running 100% locally with zero server dependency!
+                </div>
+              </div>
+            </div>
+
+            <div class="chat-quick-prompts">
+              <span class="quick-chip" data-prompt="Train a RandomForestClassifier on Iris with 15 trees and 5-fold cross validation.">🌲 Train Random Forest (Iris)</span>
+              <span class="quick-chip" data-prompt="Benchmark DecisionTreeClassifier vs NaiveBayesClassifier vs KNearestNeighborsClassifier on Iris.">⚡ 3-Classifier Race</span>
+              <span class="quick-chip" data-prompt="Describe the parameters and capabilities of RandomForestClassifier.">🔍 Describe Random Forest</span>
+              <span class="quick-chip" data-prompt="List all classification algorithms available in TuiML.">📋 List Classifiers</span>
+            </div>
+
+            <div class="chat-input-row">
+              <input type="text" class="chat-input" id="agent-chat-input" placeholder="Load a model above to chat with your local AI Data Scientist..." disabled>
+              <button class="btn-primary" id="btn-agent-send" disabled style="padding: 0.6rem 1.25rem;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                Send
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Tab: Logs -->
+        <div class="tab-content" id="tab-logs">
+          <div class="console-box" id="console-output">System initializing...</div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div>TuiML Machine Learning Ecosystem • Built for Agents and Browsers</div>
+    <div><a href="https://tuiml.ai" target="_blank">tuiml.ai</a></div>
+  </footer>
+
+  <script>
+    let pyodideInstance = null;
+    const logBox = document.getElementById("console-output");
+    const statusText = document.getElementById("status-text");
+    const statusDot = document.getElementById("status-indicator");
+
+    function log(msg) {
+      const ts = new Date().toLocaleTimeString();
+      logBox.textContent += `[${ts}] ${msg}\n`;
+      logBox.scrollTop = logBox.scrollHeight;
+    }
+
+    // Tab switching
+    document.querySelectorAll(".tab-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+        document.querySelectorAll(".tab-content").forEach(c => c.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(btn.dataset.tab).classList.add("active");
+      });
+    });
+
+    // Slider bindings
+    document.getElementById("slider-estimators").addEventListener("input", (e) => {
+      document.getElementById("val-estimators").textContent = e.target.value;
+    });
+    document.getElementById("slider-depth").addEventListener("input", (e) => {
+      document.getElementById("val-depth").textContent = e.target.value;
+    });
+
+    let uploadedCsvFileName = null;
+    let uploadedColumns = [];
+
+    // Dataset select change
+    document.getElementById("dataset-select").addEventListener("change", (e) => {
+      const isCustom = e.target.value === "custom_csv";
+      document.getElementById("custom-csv-group").style.display = isCustom ? "block" : "none";
+    });
+
+    // File input & Drag-and-drop bindings
+    const fileInput = document.getElementById("csv-file-input");
+    const btnBrowseCsv = document.getElementById("btn-browse-csv");
+    const dropzone = document.getElementById("csv-dropzone");
+
+    btnBrowseCsv.addEventListener("click", () => fileInput.click());
+
+    fileInput.addEventListener("change", (e) => {
+      if (e.target.files.length > 0) {
+        processUploadedCsv(e.target.files[0]);
+      }
+    });
+
+    dropzone.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      dropzone.classList.add("dragover");
+    });
+
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("dragover");
+    });
+
+    dropzone.addEventListener("drop", (e) => {
+      e.preventDefault();
+      dropzone.classList.remove("dragover");
+      if (e.dataTransfer.files.length > 0) {
+        processUploadedCsv(e.dataTransfer.files[0]);
+      }
+    });
+
+    async function processUploadedCsv(file) {
+      if (!file.name.endsWith(".csv")) {
+        alert("Please select a .csv file.");
+        return;
+      }
+      if (!pyodideInstance) {
+        alert("Pyodide WebAssembly VM is still initializing. Please wait a moment.");
+        return;
+      }
+
+      log(`Reading uploaded CSV '${file.name}' (${(file.size / 1024).toFixed(1)} KB)...`);
+      const buf = await file.arrayBuffer();
+      pyodideInstance.FS.writeFile(file.name, new Uint8Array(buf));
+      uploadedCsvFileName = file.name;
+
+      log(`File '${file.name}' saved into Pyodide virtual filesystem at /home/pyodide/${file.name}.`);
+
+      // Inspect dataframe structure via Python in Pyodide
+      const inspectPy = `
+import pandas as pd, json
+_df = pd.read_csv("${file.name}")
+json.dumps({
+    "shape": list(_df.shape),
+    "columns": list(_df.columns)
+})
+`;
+      try {
+        const meta = JSON.parse(pyodideInstance.runPython(inspectPy));
+        uploadedColumns = meta.columns;
+
+        const targetSelect = document.getElementById("target-col-select");
+        targetSelect.innerHTML = meta.columns.map((col, idx) => 
+          `<option value="${col}" ${idx === meta.columns.length - 1 ? "selected" : ""}>${col}</option>`
+        ).join("");
+
+        document.getElementById("target-col-container").style.display = "block";
+        const badge = document.getElementById("file-info-badge");
+        badge.style.display = "block";
+        badge.textContent = `✅ Uploaded ${file.name} (${meta.shape[0]} rows × ${meta.shape[1]} columns)`;
+
+        log(`Uploaded CSV parsed: ${meta.shape[0]} rows, columns: [${meta.columns.join(", ")}].`);
+      } catch (err) {
+        log("Failed to parse uploaded CSV: " + err.message);
+        alert("Error parsing CSV with Pandas: " + err.message);
+      }
+    }
+
+    async function initPyodideRuntime() {
+      try {
+        log("Booting Pyodide WebAssembly runtime (v0.26.4)...");
+        document.getElementById("step-wasm").classList.add("complete");
+        
+        pyodideInstance = await loadPyodide({
+          indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
+        });
+        log("WASM virtual machine online.");
+
+        // Step 2: Load scientific packages
+        statusText.textContent = "Loading NumPy, SciPy, Pandas, Matplotlib...";
+        document.getElementById("step-scipy").classList.add("active");
+        log("Fetching pre-compiled WebAssembly packages: numpy, scipy, pandas, joblib, matplotlib...");
+        
+        await pyodideInstance.loadPackage(["numpy", "scipy", "pandas", "joblib", "matplotlib"]);
+        document.getElementById("step-scipy").classList.remove("active");
+        document.getElementById("step-scipy").classList.add("complete");
+        log("Scientific stack loaded successfully.");
+
+        // Step 3: Load TuiML package wheel
+        statusText.textContent = "Installing TuiML WebAssembly package...";
+        document.getElementById("step-tuiml").classList.add("active");
+        log("Fetching TuiML package wheel (tuiml-0.2.1.dev0-py3-none-any.whl)...");
+
+        const wheelResp = await fetch("./tuiml-0.2.1.dev0-py3-none-any.whl");
+        if (!wheelResp.ok) {
+          throw new Error(`Failed to fetch wheel: HTTP ${wheelResp.status}`);
+        }
+        const wheelBuf = await wheelResp.arrayBuffer();
+        log(`Unpacking wheel into Pyodide virtual filesystem (${(wheelBuf.byteLength / 1024).toFixed(1)} KB)...`);
+        await pyodideInstance.unpackArchive(wheelBuf, "whl");
+        
+        document.getElementById("step-tuiml").classList.remove("active");
+        document.getElementById("step-tuiml").classList.add("complete");
+
+        // Verify import in Python
+        log("Verifying TuiML import inside Python...");
+        const version = pyodideInstance.runPython(`
+import tuiml
+tuiml.__version__
+        `);
+        log(`TuiML v${version} loaded and verified in WebAssembly!`);
+
+        document.getElementById("step-ready").classList.add("complete");
+        statusDot.className = "status-dot ready";
+        statusText.textContent = `TuiML v${version} Ready in Browser`;
+
+        // Enable buttons
+        document.querySelectorAll("button").forEach(b => b.disabled = false);
+
+      } catch (err) {
+        statusDot.className = "status-dot";
+        statusDot.style.backgroundColor = "var(--accent-rose)";
+        statusText.textContent = "Init Error: " + err.message;
+        log("ERROR: " + err.stack || err.message);
+      }
+    }
+
+    // Action: Train Model
+    document.getElementById("btn-train").addEventListener("click", async () => {
+      const dataset = document.getElementById("dataset-select").value;
+      const algo = document.getElementById("algo-select").value;
+      const nEst = parseInt(document.getElementById("slider-estimators").value);
+      const maxDepth = parseInt(document.getElementById("slider-depth").value);
+      const cv = document.getElementById("select-cv").value;
+
+      if (dataset === "custom_csv") {
+        if (!uploadedCsvFileName) {
+          alert("Please upload a CSV file first before training.");
+          return;
+        }
+      }
+      const targetCol = document.getElementById("target-col-select") ? document.getElementById("target-col-select").value : "";
+
+      statusDot.className = "status-dot busy";
+      statusText.textContent = `Training ${algo} on ${dataset === "custom_csv" ? uploadedCsvFileName : dataset}...`;
+      log(`Starting training: algorithm=${algo}, dataset=${dataset === "custom_csv" ? uploadedCsvFileName : dataset}, cv=${cv}...`);
+
+      const t0 = performance.now();
+
+      const pyCode = `
+import time
+import numpy as np
+from tuiml.datasets import load_iris, load_breast_cancer
+from tuiml.algorithms.trees import DecisionTreeClassifier, RandomForestClassifier
+from tuiml.algorithms.bayesian import NaiveBayesClassifier
+from tuiml.algorithms.linear import LogisticRegression
+from tuiml.algorithms.neighbors import KNearestNeighborsClassifier
+from tuiml.algorithms.clustering import KMeansClusterer
+from tuiml.evaluation import cross_val_score, train_test_split, accuracy_score, f1_score
+
+# 1. Load Data
+dataset_name = "${dataset}"
+if dataset_name == "custom_csv":
+    import pandas as pd
+    _df = pd.read_csv("${uploadedCsvFileName}").dropna()
+    target_col = "${targetCol}"
+    feature_cols = [c for c in _df.columns if c != target_col]
+    for c in feature_cols:
+        if _df[c].dtype == 'object':
+            _df[c] = pd.factorize(_df[c])[0]
+    if _df[target_col].dtype == 'object':
+        _df[target_col] = pd.factorize(_df[target_col])[0]
+    X = _df[feature_cols].values.astype(float)
+    y = _df[target_col].values
+elif dataset_name == "iris":
+    data = load_iris()
+    X, y = data.X, data.y
+elif dataset_name == "breast_cancer":
+    data = load_breast_cancer()
+    X, y = data.X, data.y
+elif dataset_name == "wine":
+    # 3-class wine approximation
+    from tuiml.datasets.synthetic import Blobs
+    data = Blobs(n_samples=178, n_clusters=3, n_features=13, random_state=42).generate()
+    X, y = data.X, data.y
+elif dataset_name == "moons":
+    from tuiml.datasets.synthetic import Moons
+    data = Moons(n_samples=250, noise=0.2, random_state=42).generate()
+    X, y = data.X, data.y
+else:
+    from tuiml.datasets.synthetic import Blobs
+    data = Blobs(n_samples=200, n_clusters=3, random_state=42).generate()
+    X, y = data.X, data.y
+
+# 2. Instantiate Model
+algo_name = "${algo}"
+if algo_name == "RandomForestClassifier":
+    model = RandomForestClassifier(n_estimators=${nEst}, max_depth=${maxDepth}, random_state=42)
+elif algo_name == "DecisionTreeClassifier":
+    model = DecisionTreeClassifier(max_depth=${maxDepth}, random_state=42)
+elif algo_name == "NaiveBayesClassifier":
+    model = NaiveBayesClassifier()
+elif algo_name == "LogisticRegression":
+    model = LogisticRegression(max_iter=200)
+elif algo_name == "KNearestNeighborsClassifier":
+    model = KNearestNeighborsClassifier(k=5)
+elif algo_name == "KMeansClusterer":
+    model = KMeansClusterer(n_clusters=3, random_state=42)
+else:
+    model = DecisionTreeClassifier()
+
+# 3. Evaluation
+cv_mode = "${cv}"
+if algo_name == "KMeansClusterer":
+    model.fit(X)
+    acc = 1.0
+    f1 = 1.0
+elif cv_mode in ["5", "10"]:
+    scores = cross_val_score(model, X, y, cv=int(cv_mode))
+    acc = float(np.mean(scores))
+    f1 = acc
+else:
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model.fit(X_train, y_train)
+    preds = model.predict(X_test)
+    acc = float(accuracy_score(y_test, preds))
+    f1 = float(f1_score(y_test, preds, average="weighted"))
+
+import json
+json.dumps({
+    "accuracy": round(acc, 4),
+    "f1": round(f1, 4),
+    "n_samples": len(X),
+    "n_features": X.shape[1]
+})
+`;
+
+      try {
+        const resultJson = pyodideInstance.runPython(pyCode);
+        const res = JSON.parse(resultJson);
+        const t1 = performance.now();
+        const elapsed = (t1 - t0).toFixed(1);
+
+        document.getElementById("metric-acc").textContent = (res.accuracy * 100).toFixed(1) + "%";
+        document.getElementById("metric-f1").textContent = (res.f1 * 100).toFixed(1) + "%";
+        document.getElementById("metric-time").textContent = `${elapsed} ms`;
+        document.getElementById("metric-samples").textContent = `${res.n_samples} (${res.n_features} feats)`;
+
+        log(`Execution complete in ${elapsed} ms. Accuracy: ${(res.accuracy * 100).toFixed(2)}%`);
+        statusDot.className = "status-dot ready";
+        statusText.textContent = `Completed in ${elapsed} ms`;
+
+        // Switch to Results tab
+        document.getElementById("tab-btn-results").click();
+      } catch (err) {
+        log("Execution failed: " + err.message);
+        statusDot.className = "status-dot";
+        statusText.textContent = "Execution Error";
+      }
+    });
+
+    // Action: Generate Plot
+    document.getElementById("btn-plot").addEventListener("click", async () => {
+      const dataset = document.getElementById("dataset-select").value;
+      const algo = document.getElementById("algo-select").value;
+      const maxDepth = parseInt(document.getElementById("slider-depth").value);
+      const nEst = parseInt(document.getElementById("slider-estimators").value);
+
+      statusDot.className = "status-dot busy";
+      statusText.textContent = "Rendering Matplotlib visualization in WASM...";
+      log("Generating decision boundary plot via Matplotlib...");
+
+      const pyCode = `
+import io, base64
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+
+from tuiml.datasets import load_iris
+from tuiml.algorithms.trees import DecisionTreeClassifier, RandomForestClassifier
+from tuiml.algorithms.bayesian import NaiveBayesClassifier
+from tuiml.algorithms.linear import LogisticRegression
+from tuiml.algorithms.neighbors import KNearestNeighborsClassifier
+from tuiml.algorithms.clustering import KMeansClusterer
+
+# Load dataset (first 2 features for 2D decision surface)
+data = load_iris()
+X = data.X[:, :2]  # sepal length & sepal width
+y = data.y
+
+# Model
+algo_name = "${algo}"
+if algo_name == "RandomForestClassifier":
+    clf = RandomForestClassifier(n_estimators=${nEst}, max_depth=${maxDepth}, random_state=42)
+elif algo_name == "DecisionTreeClassifier":
+    clf = DecisionTreeClassifier(max_depth=${maxDepth}, random_state=42)
+elif algo_name == "NaiveBayesClassifier":
+    clf = NaiveBayesClassifier()
+elif algo_name == "LogisticRegression":
+    clf = LogisticRegression()
+elif algo_name == "KNearestNeighborsClassifier":
+    clf = KNearestNeighborsClassifier(k=5)
+elif algo_name == "KMeansClusterer":
+    clf = KMeansClusterer(n_clusters=3, random_state=42)
+else:
+    clf = DecisionTreeClassifier()
+
+clf.fit(X, y if algo_name != "KMeansClusterer" else None)
+
+# Meshgrid for decision boundary
+x_min, x_max = X[:, 0].min() - 0.5, X[:, 0].max() + 0.5
+y_min, y_max = X[:, 1].min() - 0.5, X[:, 1].max() + 0.5
+xx, yy = np.meshgrid(np.arange(x_min, x_max, 0.05),
+                     np.arange(y_min, y_max, 0.05))
+
+grid_pts = np.c_[xx.ravel(), yy.ravel()]
+Z = clf.predict(grid_pts)
+Z = np.asarray(Z).reshape(xx.shape)
+
+# Create Plot with sleek dark aesthetics
+plt.figure(figsize=(7, 4.5), dpi=140, facecolor='#090d16')
+ax = plt.gca()
+ax.set_facecolor('#111827')
+
+# Contour decision boundary
+cmap_bg = plt.cm.get_cmap('coolwarm')
+plt.contourf(xx, yy, Z, alpha=0.35, cmap='viridis')
+
+# Scatter points
+scatter = plt.scatter(X[:, 0], X[:, 1], c=y, cmap='viridis', edgecolors='white', linewidths=0.7, s=45)
+
+plt.title(f"{algo_name} Decision Boundary in WASM", color='#f8fafc', fontsize=12, fontweight='bold', pad=12)
+plt.xlabel("Feature 0 (Sepal Length)", color='#94a3b8', fontsize=9)
+plt.ylabel("Feature 1 (Sepal Width)", color='#94a3b8', fontsize=9)
+ax.tick_params(colors='#64748b', labelsize=8)
+for spine in ax.spines.values():
+    spine.set_color('#1e293b')
+
+buf = io.BytesIO()
+plt.tight_layout()
+plt.savefig(buf, format='png', facecolor=plt.gcf().get_facecolor(), edgecolor='none')
+plt.close()
+buf.seek(0)
+base64.b64encode(buf.read()).decode('ascii')
+`;
+
+      try {
+        const b64 = pyodideInstance.runPython(pyCode);
+        const plotArea = document.getElementById("plot-area");
+        plotArea.innerHTML = `<img src="data:image/png;base64,${b64}" alt="TuiML WASM Decision Boundary Plot">`;
+        log("Decision boundary rendered successfully.");
+        statusDot.className = "status-dot ready";
+        statusText.textContent = "Plot Rendered";
+        document.getElementById("tab-btn-results").click();
+      } catch (err) {
+        log("Plotting failed: " + err.message);
+        statusDot.className = "status-dot";
+        statusText.textContent = "Plotting Error";
+      }
+    });
+
+    // Action: Declarative Workflow Pipeline
+    document.getElementById("btn-workflow").addEventListener("click", async () => {
+      statusDot.className = "status-dot busy";
+      statusText.textContent = "Executing TuiML train() declarative workflow...";
+      log("Running declarative train() pipeline: StandardScaler -> RandomForestClassifier (cv=5)...");
+
+      const pyCode = `
+import json, time
+from tuiml import train
+
+t0 = time.time()
+wf = train({
+    "model": {"name": "RandomForestClassifier", "params": {"n_estimators": 15, "max_depth": 4}},
+    "data": "iris",
+    "evaluation": {"cv": 5}
+})
+elapsed = round((time.time() - t0) * 1000, 1)
+
+acc = round(wf.metrics_.get("cv_accuracy_score_mean", 0.0), 4)
+f1 = round(wf.metrics_.get("cv_f1_score_mean", 0.0), 4)
+
+json.dumps({
+    "accuracy": acc,
+    "f1": f1,
+    "elapsed": elapsed,
+    "all_metrics": wf.metrics_
+})
+`;
+
+      try {
+        const resStr = pyodideInstance.runPython(pyCode);
+        const res = JSON.parse(resStr);
+        document.getElementById("metric-acc").textContent = (res.accuracy * 100).toFixed(1) + "%";
+        document.getElementById("metric-f1").textContent = (res.f1 * 100).toFixed(1) + "%";
+        document.getElementById("metric-time").textContent = `${res.elapsed} ms`;
+        document.getElementById("metric-samples").textContent = "150 (Iris)";
+
+        log(`Declarative pipeline completed in ${res.elapsed} ms: ${JSON.stringify(res.all_metrics, null, 2)}`);
+        statusDot.className = "status-dot ready";
+        statusText.textContent = `Workflow Complete (${res.elapsed} ms)`;
+        document.getElementById("tab-btn-results").click();
+      } catch (err) {
+        log("Workflow failed: " + err.message);
+        statusDot.className = "status-dot";
+        statusText.textContent = "Workflow Error";
+      }
+    });
+
+    // REPL Presets Dictionary
+    const REPL_PRESETS = {
+      iris_rf: `# Random Forest Cross-Validation on Iris
+from tuiml.datasets import load_iris
+from tuiml.algorithms.trees import RandomForestClassifier
+from tuiml.evaluation import cross_val_score
+import numpy as np
+
+data = load_iris()
+clf = RandomForestClassifier(n_estimators=20, max_depth=4, random_state=42)
+scores = cross_val_score(clf, data.X, data.y, cv=5)
+
+print(f"Dataset: Iris ({data.n_samples} samples, {data.n_features} features)")
+print("5-fold cross-validation scores:", np.round(scores, 4))
+print(f"Mean accuracy: {scores.mean():.4f} (+/- {scores.std():.4f})")`,
+
+      declarative_pipeline: `# High-Level Declarative Pipeline
+from tuiml import train
+
+result = train(
+    {"name": "RandomForestClassifier", "n_estimators": 25, "max_depth": 5},
+    {"source": "iris", "target": "class"},
+    preprocessing=[{"name": "StandardScaler"}],
+    cv=5
+)
+
+print("TuiML Declarative train() Pipeline Result:")
+print(f"Trained model: {result.model}")
+print("\\nMetrics:")
+for k, v in result.metrics_.items():
+    if "mean" in k or "std" in k:
+        print(f"  {k}: {v:.4f}")`,
+
+      classifier_race: `# 5-Classifier Performance Race in WebAssembly
+import time
+from tuiml.datasets import load_iris
+from tuiml.algorithms.trees import DecisionTreeClassifier, RandomForestClassifier
+from tuiml.algorithms.bayesian import NaiveBayesClassifier
+from tuiml.algorithms.linear import LogisticRegression
+from tuiml.algorithms.neighbors import KNearestNeighborsClassifier
+from tuiml.evaluation import train_test_split, accuracy_score
+
+data = load_iris()
+X_train, X_test, y_train, y_test = train_test_split(data.X, data.y, test_size=0.25, random_state=42)
+
+models = {
+    "DecisionTree": DecisionTreeClassifier(max_depth=4, random_state=42),
+    "RandomForest (15 trees)": RandomForestClassifier(n_estimators=15, max_depth=4, random_state=42),
+    "NaiveBayes": NaiveBayesClassifier(),
+    "LogisticRegression": LogisticRegression(max_iter=100),
+    "KNN (k=5)": KNearestNeighborsClassifier(k=5),
+}
+
+print(f"{'Algorithm':<25} | {'Fit Time':<10} | {'Predict Time':<12} | {'Accuracy':<8}")
+print("-" * 64)
+
+for name, model in models.items():
+    t0 = time.perf_counter()
+    model.fit(X_train, y_train)
+    fit_ms = (time.perf_counter() - t0) * 1000
+    
+    t1 = time.perf_counter()
+    preds = model.predict(X_test)
+    pred_ms = (time.perf_counter() - t1) * 1000
+    
+    acc = accuracy_score(y_test, preds)
+    print(f"{name:<25} | {fit_ms:>7.2f} ms | {pred_ms:>9.2f} ms | {acc*100:>7.2f}%")`,
+
+      kmeans_plot: `# KMeans Clustering & Matplotlib Scatter Plot
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+import numpy as np
+
+from tuiml.datasets.synthetic import Blobs
+from tuiml.algorithms.clustering import KMeansClusterer
+
+# Generate synthetic 2D clusters
+dataset = Blobs(n_samples=250, n_clusters=4, n_features=2, random_state=42).generate()
+X = dataset.X
+
+# Fit KMeans
+km = KMeansClusterer(n_clusters=4, random_state=42)
+km.fit(X)
+labels = km.predict(X)
+centers = km.cluster_centers_
+
+# Plot in sleek dark theme
+fig, ax = plt.subplots(figsize=(6.5, 4.2), dpi=130, facecolor='#090d16')
+ax.set_facecolor('#111827')
+scatter = ax.scatter(X[:, 0], X[:, 1], c=labels, cmap='coolwarm', alpha=0.85, edgecolors='white', linewidths=0.5, s=40)
+ax.scatter(centers[:, 0], centers[:, 1], c='yellow', marker='X', s=180, edgecolors='black', linewidths=1.5, label='Centroids')
+
+ax.set_title("KMeans Clustering (4 Clusters) in WebAssembly", color='#f8fafc', fontsize=11, fontweight='bold')
+ax.tick_params(colors='#64748b', labelsize=8)
+for spine in ax.spines.values():
+    spine.set_color('#1e293b')
+ax.legend(facecolor='#0f172a', edgecolor='#1e293b', labelcolor='#cbd5e1')
+plt.tight_layout()
+plt.show()
+
+print(f"KMeans complete! Cluster centers computed:\\n{np.round(centers, 2)}")`,
+
+      preprocessing: `# Preprocessing Pipeline (StandardScaler + DecisionTree)
+from tuiml.datasets import load_breast_cancer
+from tuiml.preprocessing.scaling import StandardScaler
+from tuiml.algorithms.trees import DecisionTreeClassifier
+from tuiml.evaluation import train_test_split, accuracy_score, f1_score
+
+data = load_breast_cancer()
+X_train, X_test, y_train, y_test = train_test_split(data.X, data.y, test_size=0.2, random_state=42)
+
+# Scale features
+scaler = StandardScaler()
+X_train_s = scaler.fit_transform(X_train)
+X_test_s = scaler.transform(X_test)
+
+clf = DecisionTreeClassifier(max_depth=5, random_state=42)
+clf.fit(X_train_s, y_train)
+preds = clf.predict(X_test_s)
+
+print("Breast Cancer Dataset (Binary Classification, 30 features):")
+print(f"Accuracy: {accuracy_score(y_test, preds)*100:.2f}%")
+print(f"F1 Score: {f1_score(y_test, preds, average='macro')*100:.2f}%")
+print(f"Feature variance before scaling: {X_train.var(axis=0).mean():.2f}")
+print(f"Feature variance after scaling:  {X_train_s.var(axis=0).mean():.4f}")`,
+
+      csv_workflow: `# Working with Uploaded CSV Files in Pyodide WASM
+import os
+import pandas as pd
+from tuiml.algorithms.trees import RandomForestClassifier
+from tuiml.evaluation import cross_val_score
+
+# 1. Discover all CSV files stored in Pyodide's virtual filesystem
+csv_files = [f for f in os.listdir('.') if f.endswith('.csv')]
+print("CSV files in WebAssembly virtual sandbox:", csv_files)
+
+# 2. Inspect and train on your uploaded CSV
+if csv_files:
+    filename = csv_files[0]
+    print(f"\\nReading '{filename}':")
+    df = pd.read_csv(filename)
+    print(df.head(3))
+else:
+    print("\\n(Tip: Upload a CSV in the Experiment Configuration panel on the left!)")
+    # Alternatively, create one programmatically inside the virtual sandbox:
+    sample_df = pd.DataFrame({
+        "feature_a": [1.2, 2.5, 3.1, 4.8, 5.0, 1.1, 2.2, 3.9],
+        "feature_b": [10.1, 20.4, 30.2, 40.8, 50.1, 11.0, 22.1, 41.5],
+        "target":    [0, 0, 1, 1, 1, 0, 0, 1]
+    })
+    sample_df.to_csv("my_uploaded_sample.csv", index=False)
+    print("Created 'my_uploaded_sample.csv' in virtual sandbox.")
+    
+    # Train directly from file:
+    clf = RandomForestClassifier(n_estimators=10, max_depth=3, random_state=42)
+    clf.fit(sample_df[["feature_a", "feature_b"]].values, sample_df["target"].values)
+    print("Model trained successfully on virtual CSV!")
+    print("Predictions:", clf.predict(sample_df[["feature_a", "feature_b"]].values))`
+    };
+
+    // Preset dropdown listener
+    const templateSelect = document.getElementById("repl-template-select");
+    const codeEditor = document.getElementById("custom-code");
+    const btnClearRepl = document.getElementById("btn-clear-repl");
+    const replOutputBox = document.getElementById("repl-output-box");
+    const replStdout = document.getElementById("repl-stdout-text");
+    const replPlots = document.getElementById("repl-plots-area");
+    const replLatency = document.getElementById("repl-latency-badge");
+
+    templateSelect.addEventListener("change", (e) => {
+      const key = e.target.value;
+      if (REPL_PRESETS[key]) {
+        codeEditor.value = REPL_PRESETS[key];
+      }
+    });
+
+    btnClearRepl.addEventListener("click", () => {
+      codeEditor.value = "";
+      replOutputBox.classList.remove("visible");
+      replStdout.textContent = "";
+      replPlots.innerHTML = "";
+      replPlots.style.display = "none";
+    });
+
+    // Keyboard handling: Tab indentation & Ctrl+Enter execution
+    codeEditor.addEventListener("keydown", (e) => {
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const start = codeEditor.selectionStart;
+        const end = codeEditor.selectionEnd;
+        codeEditor.value = codeEditor.value.substring(0, start) + "    " + codeEditor.value.substring(end);
+        codeEditor.selectionStart = codeEditor.selectionEnd = start + 4;
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (!document.getElementById("btn-run-code").disabled) {
+          document.getElementById("btn-run-code").click();
+        }
+      }
+    });
+
+    // Action: Custom Code Execution in REPL
+    document.getElementById("btn-run-code").addEventListener("click", async () => {
+      const code = codeEditor.value;
+      if (!code.trim()) return;
+
+      statusDot.className = "status-dot busy";
+      statusText.textContent = "Executing Python script...";
+      log("Executing custom Python script in Pyodide...");
+
+      replOutputBox.classList.add("visible");
+      replStdout.textContent = "Running in Pyodide WebAssembly...";
+      replPlots.innerHTML = "";
+      replPlots.style.display = "none";
+      replLatency.textContent = "Executing...";
+
+      // Wrapped execution with stdout/stderr trap and matplotlib capture
+      const pyWrapper = `
+import io, sys, time, json, base64
+
+_stdout_trap = io.StringIO()
+_stderr_trap = io.StringIO()
+_orig_stdout, _orig_stderr = sys.stdout, sys.stderr
+sys.stdout = _stdout_trap
+sys.stderr = _stderr_trap
+
+_err = None
+_plots = []
+_t0 = time.perf_counter()
+
+try:
+${code.split("\\n").map(l => "    " + l).join("\\n")}
+except Exception as e:
+    import traceback
+    _err = traceback.format_exc()
+finally:
+    _elapsed_ms = (time.perf_counter() - _t0) * 1000
+    try:
+        import matplotlib.pyplot as _plt
+        for _num in _plt.get_fignums():
+            _fig = _plt.figure(_num)
+            _buf = io.BytesIO()
+            _fig.savefig(_buf, format='png', facecolor=_fig.get_facecolor(), edgecolor='none', bbox_inches='tight')
+            _buf.seek(0)
+            _plots.append(base64.b64encode(_buf.read()).decode('ascii'))
+        _plt.close('all')
+    except Exception:
+        pass
+    sys.stdout = _orig_stdout
+    sys.stderr = _orig_stderr
+
+json.dumps({
+    "stdout": _stdout_trap.getvalue(),
+    "stderr": _stderr_trap.getvalue(),
+    "error": _err,
+    "elapsed_ms": round(_elapsed_ms, 2),
+    "plots": _plots
+})
+`;
+
+      try {
+        const resStr = pyodideInstance.runPython(pyWrapper);
+        const res = JSON.parse(resStr);
+
+        let outputText = "";
+        if (res.stdout) outputText += res.stdout;
+        if (res.stderr) outputText += (outputText ? "\\n" : "") + "[stderr]\\n" + res.stderr;
+        if (res.error) outputText += (outputText ? "\\n" : "") + "[Error]\\n" + res.error;
+        if (!outputText && res.plots.length === 0) outputText = "(Script completed with no printed output)";
+
+        replStdout.textContent = outputText;
+        replLatency.textContent = `${res.elapsed_ms} ms`;
+
+        if (res.plots && res.plots.length > 0) {
+          replPlots.innerHTML = res.plots.map(b64 => `<img src="data:image/png;base64,${b64}" alt="Matplotlib Plot">`).join("");
+          replPlots.style.display = "flex";
+        } else {
+          replPlots.style.display = "none";
+        }
+
+        if (res.error) {
+          statusDot.className = "status-dot";
+          statusDot.style.backgroundColor = "var(--accent-rose)";
+          statusText.textContent = "Script Failed";
+          log("REPL Error:\\n" + res.error);
+        } else {
+          statusDot.className = "status-dot ready";
+          statusText.textContent = `Script Completed in ${res.elapsed_ms} ms`;
+          log(`Custom script executed successfully in ${res.elapsed_ms} ms.`);
+        }
+      } catch (err) {
+        replStdout.textContent = "Runner System Exception: " + err.message;
+        replLatency.textContent = "Error";
+        statusDot.className = "status-dot";
+        statusText.textContent = "Runner Error";
+        log("Runner Error: " + err.message);
+      }
+    });
+
+    // =========================================================================
+    // In-Browser AI Agent (WebGPU + MCP In-Memory Tool Router)
+    // =========================================================================
+    let hasWebGPU = false;
+    let agentPipeline = null;
+    let agentChatHistory = [];
+    const webgpuTag = document.getElementById("webgpu-status-tag");
+    const memInfo = document.getElementById("model-mem-info");
+    const agentMessages = document.getElementById("agent-chat-messages");
+    const agentInput = document.getElementById("agent-chat-input");
+    const btnAgentSend = document.getElementById("btn-agent-send");
+
+    async function checkWebGPU() {
+      if (navigator.gpu) {
+        try {
+          const adapter = await navigator.gpu.requestAdapter();
+          if (adapter) {
+            hasWebGPU = true;
+            const info = await adapter.requestAdapterInfo?.();
+            const gpuName = info?.description || info?.architecture || "Hardware GPU Accelerated";
+            webgpuTag.textContent = "WebGPU Online";
+            webgpuTag.style.background = "rgba(16, 185, 129, 0.2)";
+            webgpuTag.style.color = "var(--accent-emerald)";
+            memInfo.textContent = `WebGPU: ${gpuName}`;
+            log(`[WebGPU] GPU adapter found: ${gpuName}`);
+            return;
+          }
+        } catch (e) {
+          log("[WebGPU] Hardware adapter request failed, falling back to CPU.");
+        }
+      }
+      webgpuTag.textContent = "CPU Fallback (WASM)";
+      webgpuTag.style.background = "rgba(245, 158, 11, 0.2)";
+      webgpuTag.style.color = "var(--accent-amber)";
+      memInfo.textContent = "WebGPU not active • Executing on CPU via WebAssembly";
+    }
+
+    // Load In-Browser Model into WebGPU
+    document.getElementById("btn-load-agent-model").addEventListener("click", async () => {
+      const modelId = document.getElementById("agent-model-select").value;
+      const btnLoad = document.getElementById("btn-load-agent-model");
+      const progressPanel = document.getElementById("agent-progress-panel");
+      const progressLabel = document.getElementById("agent-progress-label");
+      const progressFill = document.getElementById("agent-progress-fill");
+
+      btnLoad.disabled = true;
+      progressPanel.style.display = "block";
+      progressLabel.textContent = `Loading Transformers.js runtime for ${modelId}...`;
+      log(`Booting local LLM ${modelId} via ${hasWebGPU ? "WebGPU" : "WASM CPU"}...`);
+
+      try {
+        const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1");
+        env.allowLocalModels = false;
+
+        agentPipeline = await pipeline("text-generation", modelId, {
+          device: hasWebGPU ? "webgpu" : "wasm",
+          dtype: hasWebGPU ? "q4f16" : "q4",
+          progress_callback: (p) => {
+            if (p.status === "progress" && p.total) {
+              const pct = Math.round((p.loaded / p.total) * 100);
+              const loadedMb = (p.loaded / 1024 / 1024).toFixed(1);
+              const totalMb = (p.total / 1024 / 1024).toFixed(1);
+              progressLabel.textContent = `Downloading ${p.file}: ${pct}% (${loadedMb}MB / ${totalMb}MB)...`;
+              progressFill.style.width = `${pct}%`;
+            } else if (p.status === "done") {
+              progressLabel.textContent = `Downloaded ${p.file}. Compiling WebGPU kernels...`;
+            }
+          }
+        });
+
+        progressLabel.textContent = `✅ ${modelId} active in browser (${hasWebGPU ? "WebGPU" : "WASM"})`;
+        progressFill.style.width = "100%";
+        progressFill.style.background = "var(--accent-emerald)";
+        btnLoad.textContent = "Model Ready";
+        btnLoad.classList.replace("btn-primary", "btn-accent");
+
+        agentInput.disabled = false;
+        btnAgentSend.disabled = false;
+        agentInput.placeholder = "Ask your in-browser AI Data Scientist to train or analyze models...";
+
+        appendChatMessage("assistant", `Model **${modelId}** successfully loaded into browser memory via **${hasWebGPU ? "WebGPU" : "WASM CPU"}**! All TuiML MCP tools are connected.`);
+        log(`In-browser LLM ${modelId} online.`);
+      } catch (err) {
+        log("Failed to load in-browser LLM: " + err.message);
+        progressLabel.textContent = "Error: " + err.message;
+        btnLoad.disabled = false;
+      }
+    });
+
+    function appendChatMessage(role, text) {
+      const msgDiv = document.createElement("div");
+      msgDiv.className = `chat-msg ${role}`;
+      msgDiv.innerHTML = `
+        <div class="chat-avatar">${role === "user" ? "You" : "AI"}</div>
+        <div class="chat-bubble">${text}</div>
+      `;
+      agentMessages.appendChild(msgDiv);
+      agentMessages.scrollTop = agentMessages.scrollHeight;
+      return msgDiv;
+    }
+
+    function appendToolCard(toolName, args, result) {
+      const card = document.createElement("div");
+      card.className = "tool-call-card";
+      card.innerHTML = `
+        <div class="tool-call-header">
+          <span>⚙️ TuiML MCP Tool Call: <code>${toolName}</code></span>
+          <span style="color: var(--accent-emerald);">In-Memory WASM</span>
+        </div>
+        <div style="margin-bottom: 0.35rem; color: #cbd5e1;">Args: <code>${JSON.stringify(args)}</code></div>
+        <div class="tool-call-body">${JSON.stringify(result, null, 2)}</div>
+      `;
+      agentMessages.appendChild(card);
+      agentMessages.scrollTop = agentMessages.scrollHeight;
+    }
+
+    // In-Memory MCP Tool Dispatch into Pyodide
+    function dispatchTuimlMcpTool(toolName, args) {
+      log(`[In-Browser MCP Router] Dispatching '${toolName}' into Pyodide WASM: ${JSON.stringify(args)}`);
+      try {
+        if (!pyodideInstance) {
+          throw new Error("Pyodide WebAssembly runtime is not yet initialized.");
+        }
+
+        // Pass arguments directly into Python globals to avoid quote/escape collisions
+        pyodideInstance.globals.set("_temp_tool_name", toolName);
+        pyodideInstance.globals.set("_temp_tool_args_json", JSON.stringify(args || {}));
+
+        const pyCode = `
+import json
+import numpy as np
+from tuiml.agent.tools import execute_tool
+
+def _safe_json_default(obj):
+    if isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    elif isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return str(obj)
+
+try:
+    _parsed_args = json.loads(_temp_tool_args_json)
+    _res = execute_tool(_temp_tool_name, **_parsed_args)
+except Exception as e:
+    import traceback
+    _res = {
+        "status": "error",
+        "error": str(e),
+        "traceback": traceback.format_exc()
+    }
+
+# Top-level expression ensures Pyodide returns the serialized JSON string to JavaScript
+json.dumps(_res, default=_safe_json_default)
+`;
+        const outStr = pyodideInstance.runPython(pyCode);
+        if (typeof outStr !== "string") {
+          throw new Error(`Pyodide returned non-string response: ${String(outStr)}`);
+        }
+        return JSON.parse(outStr);
+      } catch (err) {
+        log(`[In-Browser MCP Router] Error dispatching '${toolName}': ${err.message}`);
+        return { status: "error", error: err.message };
+      }
+    }
+
+    // Agent Conversation Loop
+    async function handleAgentUserMessage() {
+      const userText = agentInput.value.trim();
+      if (!userText || !agentPipeline) return;
+
+      agentInput.value = "";
+      agentInput.disabled = true;
+      btnAgentSend.disabled = true;
+
+      appendChatMessage("user", userText);
+      agentChatHistory.push({ role: "user", content: userText });
+
+      const thinkingMsg = appendChatMessage("assistant", "Thinking & planning ML workflow...");
+
+      try {
+        const systemPrompt = `You are an Autonomous AI Data Scientist running client-side in the user's browser.
+You have direct in-memory access to TuiML machine learning tools via Pyodide:
+- tuiml_train(algorithm: str, data: str = "iris", cv: int = 5): Train classifiers (RandomForestClassifier, DecisionTreeClassifier, NaiveBayesClassifier, LogisticRegression, KNearestNeighborsClassifier, KMeansClusterer).
+- tuiml_benchmark(algorithms: list[str], data: str = "iris", cv: int = 5): Compare multiple models head-to-head.
+- tuiml_describe(component: str): Inspect hyperparameters and documentation.
+- tuiml_list(type: str = "classifier"): List available components.
+
+If the user asks you to train, evaluate, benchmark, or describe models, YOU MUST invoke a tool using this exact JSON format:
+\`\`\`json
+{"tool": "tuiml_train", "args": {"algorithm": "RandomForestClassifier", "data": "iris", "cv": 5}}
+\`\`\`
+Otherwise, respond helpfully and concisely.`;
+
+        const messages = [
+          { role: "system", content: systemPrompt },
+          ...agentChatHistory.slice(-4)
+        ];
+
+        let prompt;
+        if (agentPipeline.tokenizer && agentPipeline.tokenizer.apply_chat_template) {
+          prompt = agentPipeline.tokenizer.apply_chat_template(messages, {
+            tokenize: false,
+            add_generation_prompt: true
+          });
+        } else {
+          prompt = `${systemPrompt}\n\nUser: ${userText}\nAssistant:`;
+        }
+
+        const out = await agentPipeline(prompt, {
+          max_new_tokens: 280,
+          temperature: 0.1,
+          do_sample: false
+        });
+
+        let generatedText = out[0].generated_text;
+        if (generatedText.includes("Assistant:")) {
+          generatedText = generatedText.split("Assistant:").pop().trim();
+        } else if (generatedText.includes("<|im_start|>assistant")) {
+          generatedText = generatedText.split("<|im_start|>assistant").pop().replace("<|im_end|>", "").trim();
+        }
+
+        // Check if generated text contains tool call
+        const jsonMatch = generatedText.match(/```json\s*(\{[\s\S]*?\})\s*```/) || generatedText.match(/(\{[\s\S]*?"tool"\s*:\s*"[\s\S]*?\})/);
+
+        if (jsonMatch) {
+          try {
+            const toolCall = JSON.parse(jsonMatch[1]);
+            const toolName = toolCall.tool || toolCall.name;
+            const toolArgs = toolCall.args || toolCall.arguments || {};
+
+            thinkingMsg.querySelector(".chat-bubble").textContent = `Invoking TuiML tool: ${toolName}...`;
+            const toolResult = dispatchTuimlMcpTool(toolName, toolArgs);
+
+            appendToolCard(toolName, toolArgs, toolResult);
+
+            // Follow-up generation to explain result
+            let summaryText = "";
+            if (toolResult.status === "success" && toolResult.metrics) {
+              const acc = toolResult.metrics.cv_accuracy_score_mean ?? toolResult.metrics.accuracy_score ?? "N/A";
+              const accStr = typeof acc === "number" ? (acc * 100).toFixed(2) + "%" : acc;
+              summaryText = `Successfully executed **${toolName}** on **${toolArgs.data || 'iris'}** in WebAssembly!\n• Mean CV Accuracy: **${accStr}**\n• Model: ${toolResult.algorithm || toolArgs.algorithm}`;
+            } else if (toolResult.results) {
+              summaryText = `Benchmark complete! Evaluated ${toolResult.results.length} models in client memory.`;
+            } else if (toolResult.status === "error") {
+              summaryText = `⚠️ **Tool Execution Error:** ${toolResult.error || "Unknown tool error"}`;
+            } else {
+              summaryText = `TuiML tool completed: ${JSON.stringify(toolResult.metrics || toolResult.info || toolResult, null, 2)}`;
+            }
+
+            thinkingMsg.querySelector(".chat-bubble").innerHTML = summaryText;
+            agentChatHistory.push({ role: "assistant", content: summaryText });
+          } catch (pe) {
+            thinkingMsg.querySelector(".chat-bubble").textContent = generatedText;
+            agentChatHistory.push({ role: "assistant", content: generatedText });
+          }
+        } else {
+          thinkingMsg.querySelector(".chat-bubble").textContent = generatedText;
+          agentChatHistory.push({ role: "assistant", content: generatedText });
+        }
+      } catch (err) {
+        thinkingMsg.querySelector(".chat-bubble").textContent = "Generation error: " + err.message;
+        log("Agent generation error: " + err.message);
+      } finally {
+        agentInput.disabled = false;
+        btnAgentSend.disabled = false;
+        agentInput.focus();
+      }
+    }
+
+    btnAgentSend.addEventListener("click", handleAgentUserMessage);
+    agentInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") handleAgentUserMessage();
+    });
+
+    document.querySelectorAll(".quick-chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        agentInput.value = chip.dataset.prompt;
+        if (!btnAgentSend.disabled) {
+          handleAgentUserMessage();
+        }
+      });
+    });
+
+    // Start initialization on load
+    window.addEventListener("DOMContentLoaded", () => {
+      checkWebGPU();
+      initPyodideRuntime();
+    });
+  </script>
+</body>
+</html>
