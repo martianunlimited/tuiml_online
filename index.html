@@ -1922,6 +1922,7 @@ json.dumps({
     // =========================================================================
     let hasWebGPU = false;
     let agentPipeline = null;
+    let agentModelName = null;
     let agentChatHistory = [];
     const webgpuTag = document.getElementById("webgpu-status-tag");
     const memInfo = document.getElementById("model-mem-info");
@@ -1987,6 +1988,7 @@ json.dumps({
           }
         });
 
+        agentModelName = modelId.split("/").pop();
         progressLabel.textContent = `✅ ${modelId} active in browser (${hasWebGPU ? "WebGPU" : "WASM"})`;
         progressFill.style.width = "100%";
         progressFill.style.background = "var(--accent-emerald)";
@@ -1997,7 +1999,7 @@ json.dumps({
         btnAgentSend.disabled = false;
         agentInput.placeholder = "Ask your in-browser AI Data Scientist to train or analyze models...";
 
-        appendChatMessage("assistant", `Model **${modelId}** successfully loaded into browser memory via **${hasWebGPU ? "WebGPU" : "WASM CPU"}**! All TuiML MCP tools are connected.`);
+        appendChatMessage("assistant", `Model <strong>${modelId}</strong> successfully loaded into browser memory via <strong>${hasWebGPU ? "WebGPU" : "WASM CPU"}</strong>! All TuiML MCP tools are connected.`);
         log(`In-browser LLM ${modelId} online.`);
       } catch (err) {
         log("Failed to load in-browser LLM: " + err.message);
@@ -2098,104 +2100,141 @@ json.dumps(_res, default=_safe_json_default)
       }
     }
 
-    // Semantic Intent Parser: Maps user prompts directly to TuiML tools & arguments
+    // =========================================================================
+    // Two-stage agent:
+    //   1. Deterministic router decides whether the message is an ML command.
+    //   2a. ML command  -> run TuiML tool in Pyodide, then the LLM explains the result.
+    //   2b. Anything else -> LLM answers in plain chat mode (NO tool schema in the
+    //       prompt, so small models cannot hallucinate tool JSON).
+    // =========================================================================
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    // Semantic Intent Parser: maps explicit ML commands to TuiML tools & arguments.
+    // Returns null for greetings, questions and general conversation.
     function parseUserIntent(userText) {
       const text = userText.toLowerCase();
 
-      // Algorithm Map (Natural language and class names)
       const algoMap = [
-        { pattern: /\\b(random\\s*forest|rf|RandomForestClassifier)\\b/i, name: "RandomForestClassifier" },
-        { pattern: /\\b(decision\\s*tree|dt|c45|DecisionTreeClassifier)\\b/i, name: "DecisionTreeClassifier" },
-        { pattern: /\\b(naive\\s*bayes|nb|gaussian\\s*nb|NaiveBayesClassifier)\\b/i, name: "NaiveBayesClassifier" },
-        { pattern: /\\b(logistic\\s*regression|logistic|logit|lr|LogisticRegression)\\b/i, name: "LogisticRegression" },
-        { pattern: /\\b(knn|k-nearest|k\\s*nearest|kneighbors|KNearestNeighborsClassifier)\\b/i, name: "KNearestNeighborsClassifier" },
-        { pattern: /\\b(svm|svc|support\\s*vector|SVC)\\b/i, name: "SVC" },
-        { pattern: /\\b(xgboost|xgb|XGBoostClassifier)\\b/i, name: "XGBoostClassifier" },
-        { pattern: /\\b(lightgbm|lgb|LightGBMClassifier)\\b/i, name: "LightGBMClassifier" },
-        { pattern: /\\b(catboost|CatBoostClassifier)\\b/i, name: "CatBoostClassifier" },
-        { pattern: /\\b(kmeans|k-means|KMeansClusterer)\\b/i, name: "KMeansClusterer" },
-        { pattern: /\\b(dbscan|DBSCANClusterer)\\b/i, name: "DBSCANClusterer" },
-        { pattern: /\\b(linear\\s*regression|LinearRegression)\\b/i, name: "LinearRegression" }
+        { pattern: /\b(random\s*forest|rf|randomforestclassifier)\b/i, name: "RandomForestClassifier" },
+        { pattern: /\b(decision\s*tree|dt|c45|decisiontreeclassifier)\b/i, name: "DecisionTreeClassifier" },
+        { pattern: /\b(naive\s*bayes|nb|naivebayes|naivebayesclassifier)\b/i, name: "NaiveBayesClassifier" },
+        { pattern: /\b(logistic\s*regression|logistic|logit|logisticregression)\b/i, name: "LogisticRegression" },
+        { pattern: /\b(knn|k-nearest|k\s*nearest|kneighbors|knearestneighborsclassifier)\b/i, name: "KNearestNeighborsClassifier" },
+        { pattern: /\b(svm|svc|support\s*vector)\b/i, name: "SVC" },
+        { pattern: /\b(kmeans|k-means|kmeansclusterer)\b/i, name: "KMeansClusterer" }
       ];
+      const matchedAlgos = algoMap.filter(a => a.pattern.test(userText)).map(a => a.name);
 
-      const matchedAlgos = [];
-      for (const item of algoMap) {
-        if (item.pattern.test(userText)) {
-          matchedAlgos.push(item.name);
-        }
-      }
-
-      // Dataset Detection
-      let matchedData = null;
+      let matchedData;
       if (uploadedCsvFileName && (text.includes("csv") || text.includes("upload") || text.includes(uploadedCsvFileName.toLowerCase()))) {
         matchedData = uploadedCsvFileName;
-      } else if (text.includes("diabetes")) {
-        matchedData = "diabetes";
-      } else if (text.includes("breast") || text.includes("cancer")) {
-        matchedData = "breast-cancer";
-      } else if (text.includes("glass")) {
-        matchedData = "glass";
-      } else if (text.includes("wine")) {
-        matchedData = "wine";
-      } else if (text.includes("vote")) {
-        matchedData = "vote";
-      } else if (text.includes("ionosphere")) {
-        matchedData = "ionosphere";
-      } else if (text.includes("iris")) {
-        matchedData = "iris";
-      } else {
-        matchedData = uploadedCsvFileName ? uploadedCsvFileName : "iris";
-      }
+      } else if (text.includes("diabetes")) matchedData = "diabetes";
+      else if (text.includes("breast") || text.includes("cancer")) matchedData = "breast-cancer";
+      else if (text.includes("glass")) matchedData = "glass";
+      else if (text.includes("vote")) matchedData = "vote";
+      else if (text.includes("ionosphere")) matchedData = "ionosphere";
+      else if (text.includes("iris")) matchedData = "iris";
+      else matchedData = uploadedCsvFileName || "iris";
 
-      // CV Folds Detection
       let cv = 5;
-      const cvMatch = text.match(/(\\d+)[- ]?fold/i) || text.match(/cv\\s*[:=]?\\s*(\\d+)/i) || text.match(/(\\d+)\\s*cv/i);
-      if (cvMatch) {
-        cv = Math.min(Math.max(parseInt(cvMatch[1]), 2), 20);
+      const cvMatch = text.match(/(\d+)[- ]?fold/) || text.match(/cv\s*[:=]?\s*(\d+)/) || text.match(/(\d+)\s*cv/);
+      if (cvMatch) cv = Math.min(Math.max(parseInt(cvMatch[1]), 2), 20);
+
+      // Only explicit imperative commands trigger tools.
+      const isBenchmark = /\b(benchmark|compare|race)\b/.test(text) || (/\b(vs|versus)\b/.test(text) && matchedAlgos.length >= 2);
+      const isDescribe = /\b(describe|hyperparameters|parameters of)\b/.test(text) && matchedAlgos.length > 0;
+      const isList = /\b(list)\b/.test(text) && /\b(algorithm|classifier|model|component)s?\b/.test(text);
+      const isTrain = /\b(train|fit|cross[- ]?validate|evaluate)\b/.test(text);
+
+      if (isBenchmark) {
+        return { tool: "tuiml_benchmark", args: {
+          algorithms: matchedAlgos.length >= 2 ? matchedAlgos : ["RandomForestClassifier", "DecisionTreeClassifier", "NaiveBayesClassifier"],
+          data: matchedData, cv } };
       }
-
-      // Intent Classification
-      const isBenchmark = /\\b(benchmark|compare|comparison|race|versus|vs|against)\\b/i.test(text);
-      const isDescribe = /\\b(describe|explain|details|info on|hyperparameters|parameters of)\\b/i.test(text) && !/\\b(train|fit|run)\\b/i.test(text);
-      const isList = /\\b(list|show all|what algorithms|which models|available models)\\b/i.test(text);
-      const isTrain = /\\b(train|fit|run|evaluate|build|model|classifier)\\b/i.test(text) || matchedAlgos.length > 0;
-
-      if (isBenchmark || matchedAlgos.length > 1) {
-        return {
-          tool: "tuiml_benchmark",
-          args: {
-            algorithms: matchedAlgos.length >= 2 ? matchedAlgos : ["RandomForestClassifier", "DecisionTreeClassifier", "NaiveBayesClassifier"],
-            data: matchedData,
-            cv: cv
-          }
-        };
-      } else if (isDescribe) {
-        return {
-          tool: "tuiml_describe",
-          args: {
-            name: matchedAlgos[0] || "RandomForestClassifier"
-          }
-        };
-      } else if (isList) {
-        return {
-          tool: "tuiml_list",
-          args: {
-            category: "algorithm"
-          }
-        };
-      } else if (isTrain || matchedAlgos.length === 1) {
-        return {
-          tool: "tuiml_train",
-          args: {
-            algorithm: matchedAlgos[0] || "RandomForestClassifier",
-            data: matchedData,
-            cv: cv
-          }
-        };
+      if (isDescribe) return { tool: "tuiml_describe", args: { name: matchedAlgos[0] } };
+      if (isList) return { tool: "tuiml_list", args: { category: "algorithm" } };
+      if (isTrain) {
+        return { tool: "tuiml_train", args: { algorithm: matchedAlgos[0] || "RandomForestClassifier", data: matchedData, cv } };
       }
-
       return null;
     }
+
+    // Run the in-browser LLM on a list of chat messages and return clean text + stats.
+    async function runLocalLLM(messages, maxNewTokens = 200) {
+      const t0 = performance.now();
+      const prompt = agentPipeline.tokenizer.apply_chat_template(messages, {
+        tokenize: false,
+        add_generation_prompt: true
+      });
+      const out = await agentPipeline(prompt, {
+        max_new_tokens: maxNewTokens,
+        do_sample: false,
+        return_full_text: false
+      });
+      let text = (out[0].generated_text || "")
+        .replace(/<\|im_end\|>[\s\S]*$/, "")
+        .replace(/<end_of_turn>[\s\S]*$/, "")
+        .trim();
+      const ms = performance.now() - t0;
+      log(`[LLM] ${agentModelName} generated ${text.length} chars in ${(ms / 1000).toFixed(2)}s. Raw output: ${JSON.stringify(text)}`);
+      return { text, ms };
+    }
+
+    // Strip any JSON/tool-call-looking content a small model may still emit in chat mode.
+    function stripToolJson(text) {
+      return text
+        .replace(/```(?:json)?[\s\S]*?```/g, "")
+        .replace(/\{[\s\S]*"tool"[\s\S]*\}/g, "")
+        .trim();
+    }
+
+    function llmBadge(ms) {
+      const device = hasWebGPU ? "WebGPU" : "WASM CPU";
+      return `<div style="margin-top:0.5rem;font-size:0.7rem;color:var(--text-dim);">🧠 ${escapeHtml(agentModelName)} · ${device} · ${(ms / 1000).toFixed(2)}s</div>`;
+    }
+
+    function formatToolSummary(tool, args, res) {
+      if (res.status !== "success") return `⚠️ <strong>Tool error:</strong> ${escapeHtml(res.error || JSON.stringify(res))}`;
+      if (tool === "tuiml_train" && res.metrics) {
+        const acc = res.metrics.cv_accuracy_score_mean ?? res.metrics.accuracy_score;
+        const f1 = res.metrics.cv_f1_score_mean ?? res.metrics.f1_score;
+        return `✅ Trained <strong>${escapeHtml(args.algorithm)}</strong> on <strong>${escapeHtml(args.data)}</strong> (${args.cv}-fold CV)` +
+          (typeof acc === "number" ? `<br>• Accuracy: <strong>${(acc * 100).toFixed(2)}%</strong>` : "") +
+          (typeof f1 === "number" ? `<br>• F1: <strong>${(f1 * 100).toFixed(2)}%</strong>` : "");
+      }
+      if (tool === "tuiml_benchmark") {
+        return `⚡ Benchmark complete on <strong>${escapeHtml(args.data)}</strong> (${args.cv}-fold CV):<pre style="white-space:pre-wrap;margin:0.4rem 0 0;">${escapeHtml(res.summary || "")}</pre>`;
+      }
+      if (tool === "tuiml_describe") {
+        return `🔍 <strong>${escapeHtml(res.name)}</strong> (${escapeHtml(res.type)}): ${escapeHtml(res.description || "")}<br>• ${Object.keys(res.parameters || {}).length} hyperparameters: ${escapeHtml(Object.keys(res.parameters || {}).join(", "))}`;
+      }
+      if (tool === "tuiml_list") {
+        return `📋 Found <strong>${res.total || res.count}</strong> TuiML algorithms in this WebAssembly build.`;
+      }
+      return escapeHtml(JSON.stringify(res));
+    }
+
+    // Compact, plain-text version of a tool result for the LLM to explain.
+    function toolResultForLLM(tool, args, res) {
+      if (res.status !== "success") return `The tool failed with error: ${res.error}`;
+      if (tool === "tuiml_train" && res.metrics) {
+        const m = res.metrics;
+        return `${args.algorithm} trained on the ${args.data} dataset with ${args.cv}-fold cross-validation. ` +
+          `Mean accuracy ${(m.cv_accuracy_score_mean ?? m.accuracy_score ?? 0).toFixed(4)}, mean F1 ${(m.cv_f1_score_mean ?? m.f1_score ?? 0).toFixed(4)}.`;
+      }
+      if (tool === "tuiml_benchmark") return res.summary || "Benchmark finished.";
+      if (tool === "tuiml_describe") return `${res.name}: ${res.description}. Parameters: ${Object.keys(res.parameters || {}).join(", ")}.`;
+      if (tool === "tuiml_list") return `There are ${res.total || res.count} algorithms available.`;
+      return JSON.stringify(res).slice(0, 600);
+    }
+
+    const CHAT_SYSTEM_PROMPT = `You are a friendly AI data scientist assistant running entirely inside the user's web browser.
+You are connected to TuiML, a machine learning toolkit running in WebAssembly. The user can type commands such as
+"Train LogisticRegression on diabetes with 10 folds", "Benchmark RandomForest vs NaiveBayes on iris", "Describe SVC" or "List algorithms" and they will be executed automatically.
+Answer conversationally in plain English, briefly (2-4 sentences). Never write JSON or code unless the user asks for code.`;
 
     // Agent Conversation Loop
     async function handleAgentUserMessage() {
@@ -2206,178 +2245,63 @@ json.dumps(_res, default=_safe_json_default)
       agentInput.disabled = true;
       btnAgentSend.disabled = true;
 
-      appendChatMessage("user", userText);
-      agentChatHistory.push({ role: "user", content: userText });
-
-      const thinkingMsg = appendChatMessage("assistant", "Thinking & planning ML workflow...");
+      appendChatMessage("user", escapeHtml(userText));
+      const thinkingMsg = appendChatMessage("assistant", "Thinking...");
+      const bubble = thinkingMsg.querySelector(".chat-bubble");
 
       try {
-        const userIntent = parseUserIntent(userText);
-        let finalTool = null;
-        let finalArgs = null;
-        let llmExplanation = "";
+        const intent = parseUserIntent(userText);
+        log(`[Agent] Router decision for ${JSON.stringify(userText)}: ${intent ? intent.tool + " " + JSON.stringify(intent.args) : "chat (LLM)"}`);
 
-        if (agentPipeline) {
-          const activeData = uploadedCsvFileName || "iris";
-          const systemPrompt = `You are an Autonomous AI Data Scientist running in the user's browser with TuiML ML tools.
+        if (intent) {
+          // ---- ML command path ----
+          bubble.textContent = `Running ${intent.tool} in WebAssembly...`;
+          await new Promise(r => setTimeout(r, 30)); // let the UI repaint before blocking Pyodide call
+          const res = dispatchTuimlMcpTool(intent.tool, intent.args);
+          appendToolCard(intent.tool, intent.args, res);
 
-Rules:
-1. For greetings (like "hello", "hi", "hey"), introductions, or general conversation, ALWAYS respond directly in natural, friendly English. Do NOT output JSON or call any tools.
-2. ONLY output a tool JSON block when the user specifically commands you to train, evaluate, benchmark, or describe a machine learning model.
-3. Tool call format:
-\`\`\`json
-{"tool": "<name>", "args": {<arguments>}}
-\`\`\`
+          let html = formatToolSummary(intent.tool, intent.args, res);
+          const resultText = toolResultForLLM(intent.tool, intent.args, res);
 
-Available TuiML tools:
-- tuiml_train(algorithm, data, cv)
-- tuiml_benchmark(algorithms, data, cv)
-- tuiml_describe(name)
-- tuiml_list(category)
-
-Current dataset available: "${activeData}".
-Supported algorithms: RandomForestClassifier, DecisionTreeClassifier, NaiveBayesClassifier, LogisticRegression, KNearestNeighborsClassifier, SVC, KMeansClusterer.`;
-
-          const messages = [
-            { role: "system", content: systemPrompt },
-            ...agentChatHistory.slice(-4)
-          ];
-
-          let prompt;
-          if (agentPipeline.tokenizer && agentPipeline.tokenizer.apply_chat_template) {
-            prompt = agentPipeline.tokenizer.apply_chat_template(messages, {
-              tokenize: false,
-              add_generation_prompt: true
-            });
-          } else {
-            prompt = `${systemPrompt}\n\nUser: ${userText}\nAssistant:`;
+          if (agentPipeline) {
+            bubble.innerHTML = html + `<div style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-dim);">🧠 ${escapeHtml(agentModelName)} is interpreting the result...</div>`;
+            const { text, ms } = await runLocalLLM([
+              { role: "system", content: CHAT_SYSTEM_PROMPT },
+              { role: "user", content: `I asked: "${userText}". The TuiML tool returned: ${resultText}\nExplain this result to me in 2-3 sentences.` }
+            ], 160);
+            const explanation = stripToolJson(text);
+            if (explanation) html += `<div style="margin-top:0.6rem;">${escapeHtml(explanation)}</div>`;
+            html += llmBadge(ms);
           }
-
-          const out = await agentPipeline(prompt, {
-            max_new_tokens: 256,
-            temperature: 0.1,
-            do_sample: false,
-            return_full_text: false
-          });
-
-          let generatedText = out[0].generated_text || "";
-          if (prompt && typeof prompt === "string" && generatedText.startsWith(prompt)) {
-            generatedText = generatedText.slice(prompt.length);
-          }
-          generatedText = generatedText
-            .replace(/^<\|im_start\|>assistant\s*/i, "")
-            .replace(/^<start_of_turn>model\s*/i, "")
-            .replace(/^Assistant:\s*/i, "")
-            .replace(/<\|im_end\|>.*$/s, "")
-            .replace(/<end_of_turn>.*$/s, "")
-            .trim();
-
-          const jsonMatch = generatedText.match(/```json\s*(\{[\s\S]*?\})\s*```/) || generatedText.match(/(\{[\s\S]*?"tool"\s*:\s*"[\s\S]*?\})/);
-          let toolCall = null;
-          if (jsonMatch) {
-            try {
-              toolCall = JSON.parse(jsonMatch[1]);
-            } catch (e) {}
-          }
-
-          const isGreeting = /^(hello|hi|hey|greetings|good\s*(morning|afternoon|evening)|sup|howdy|who are you|what can you do)[\s!.?]*$/i.test(userText.trim().toLowerCase());
-          const hasActionVerb = /\b(train|fit|run|evaluate|benchmark|compare|race|versus|vs|describe|explain|list|profile)\b/i.test(userText.toLowerCase());
-
-          if (isGreeting) {
-            // Conversational greeting: never execute a tool
-            llmExplanation = (toolCall || !generatedText) 
-              ? "Hello! I am your in-browser Autonomous AI Data Scientist powered by WebGPU and TuiML WebAssembly. How can I assist you with machine learning today? You can ask me to train, benchmark, evaluate, or describe any model on your data."
-              : generatedText;
-          } else if (userIntent) {
-            finalTool = userIntent.tool;
-            finalArgs = userIntent.args;
-          } else if (toolCall && hasActionVerb) {
-            finalTool = toolCall.tool || toolCall.name;
-            finalArgs = toolCall.args || toolCall.arguments || {};
-          } else {
-            // Conversational or factual response
-            if (toolCall) {
-              // Strip hallucinated JSON if user didn't ask for training
-              llmExplanation = "I am ready to help you analyze your data! You can command me to train a model (e.g. *'Train LogisticRegression on diabetes'*), benchmark models, or inspect algorithms.";
-            } else {
-              llmExplanation = generatedText || "How can I help you with your machine learning workflow?";
-            }
-          }
+          bubble.innerHTML = html;
+          agentChatHistory.push({ role: "user", content: userText });
+          agentChatHistory.push({ role: "assistant", content: resultText });
+        } else if (agentPipeline) {
+          // ---- Conversational path: pure chat, no tool schema ----
+          const history = agentChatHistory.slice(-6);
+          const { text, ms } = await runLocalLLM([
+            { role: "system", content: CHAT_SYSTEM_PROMPT },
+            ...history,
+            { role: "user", content: userText }
+          ], 220);
+          const reply = stripToolJson(text) || "I'm here to help! Try asking me to train or benchmark a model.";
+          bubble.innerHTML = escapeHtml(reply).replace(/\n/g, "<br>") + llmBadge(ms);
+          agentChatHistory.push({ role: "user", content: userText });
+          agentChatHistory.push({ role: "assistant", content: reply });
         } else {
-          // No LLM loaded yet: use Instant Intent Router
-          if (userIntent) {
-            finalTool = userIntent.tool;
-            finalArgs = userIntent.args;
-          } else {
-            llmExplanation = `I am your **In-Browser AI Data Scientist**!
-<br><br>
-You can ask me to:
-• **Train models**: <em>"Train LogisticRegression on diabetes with 10 folds"</em>
-• **Run benchmarks**: <em>"Benchmark Random Forest vs Decision Tree vs KNN on iris"</em>
-• **Describe models**: <em>"Describe SVC"</em>
-• **List algorithms**: <em>"List all classifiers"</em>
-<br><br>
-💡 <em>Tip: Load a WebGPU model above if you'd like to enable free-form conversational reasoning!</em>`;
-          }
-        }
-
-        // Execute Tool if an action was identified
-        if (finalTool) {
-          thinkingMsg.querySelector(".chat-bubble").textContent = `Invoking TuiML MCP Tool: ${finalTool}...`;
-          const toolResult = dispatchTuimlMcpTool(finalTool, finalArgs);
-
-          appendToolCard(finalTool, finalArgs, toolResult);
-
-          let summaryText = "";
-          if (finalTool === "tuiml_train") {
-            if (toolResult.status === "success" && toolResult.metrics) {
-              const acc = toolResult.metrics.cv_accuracy_score_mean ?? toolResult.metrics.accuracy_score ?? "N/A";
-              const accStr = typeof acc === "number" ? (acc * 100).toFixed(2) + "%" : acc;
-              const f1 = toolResult.metrics.cv_f1_score_mean ?? toolResult.metrics.f1_score ?? null;
-              const f1Str = typeof f1 === "number" ? (f1 * 100).toFixed(2) + "%" : null;
-              summaryText = `✅ Trained **${finalArgs.algorithm}** on **${finalArgs.data || 'iris'}** in WebAssembly!
-<br>• <strong>Accuracy:</strong> ${accStr} (${finalArgs.cv || 5}-fold Cross-Validation)
-${f1Str ? `<br>• <strong>F1 Score:</strong> ${f1Str}` : ""}
-<br>• <strong>Target Execution:</strong> In-Browser Client WebAssembly`;
-            } else {
-              summaryText = `⚠️ **Training Notice:** ${toolResult.error || JSON.stringify(toolResult)}`;
-            }
-          } else if (finalTool === "tuiml_benchmark") {
-            if (toolResult.status === "success") {
-              const count = finalArgs.algorithms ? finalArgs.algorithms.length : "all";
-              summaryText = `⚡ **Benchmark Race Complete!** Evaluated **${count}** models on **${finalArgs.data}** with ${finalArgs.cv}-fold CV entirely in client memory. See the full scores in the card above.`;
-            } else {
-              summaryText = `⚠️ **Benchmark Notice:** ${toolResult.error || JSON.stringify(toolResult)}`;
-            }
-          } else if (finalTool === "tuiml_describe") {
-            if (toolResult.status === "success") {
-              summaryText = `🔍 **${toolResult.name}** (${toolResult.type})
-<br>${toolResult.description || ""}
-<br>• <strong>Tags:</strong> ${(toolResult.tags || []).join(", ") || "None"}
-<br>• <strong>Parameters:</strong> ${Object.keys(toolResult.parameters || {}).length} tunable hyperparameters.`;
-            } else {
-              summaryText = `⚠️ **Describe Notice:** ${toolResult.error || "Component not found."}`;
-            }
-          } else if (finalTool === "tuiml_list") {
-            if (toolResult.status === "success") {
-              const total = toolResult.total || toolResult.count || 50;
-              summaryText = `📋 **TuiML Ecosystem Components:**
-<br>Found **${total}** available algorithms and tools in the current WebAssembly build.`;
-            } else {
-              summaryText = `⚠️ **List Notice:** ${toolResult.error || JSON.stringify(toolResult)}`;
-            }
-          }
-
-          thinkingMsg.querySelector(".chat-bubble").innerHTML = summaryText;
-          agentChatHistory.push({ role: "assistant", content: summaryText });
-        } else {
-          thinkingMsg.querySelector(".chat-bubble").innerHTML = llmExplanation;
-          agentChatHistory.push({ role: "assistant", content: llmExplanation });
+          // ---- No LLM loaded ----
+          bubble.innerHTML = `No language model is loaded yet, so I can only run explicit commands. Try:
+<br>• <em>Train LogisticRegression on diabetes with 10 folds</em>
+<br>• <em>Benchmark RandomForest vs NaiveBayes vs KNN on iris</em>
+<br>• <em>Describe SVC</em>
+<br>• <em>List algorithms</em>
+<br><br>💡 Load a model above to enable free-form conversation.`;
         }
       } catch (err) {
-        thinkingMsg.querySelector(".chat-bubble").textContent = "Generation error: " + err.message;
-        log("Agent generation error: " + err.message);
+        bubble.textContent = "Generation error: " + err.message;
+        log("Agent generation error: " + (err.stack || err.message));
       } finally {
+        agentMessages.scrollTop = agentMessages.scrollHeight;
         agentInput.disabled = false;
         btnAgentSend.disabled = false;
         agentInput.focus();
