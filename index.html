@@ -1135,7 +1135,7 @@ print(f"Mean accuracy: {scores.mean():.4f} (+/- {scores.std():.4f})")
             </div>
 
             <div class="chat-input-row">
-              <input type="text" class="chat-input" id="agent-chat-input" placeholder="Load a model above to chat with your local AI Data Scientist..." disabled>
+              <input type="text" class="chat-input" id="agent-chat-input" placeholder="Initializing WebAssembly runtime..." disabled>
               <button class="btn-primary" id="btn-agent-send" disabled style="padding: 0.6rem 1.25rem;">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
                 Send
@@ -1321,8 +1321,11 @@ tuiml.__version__
         statusDot.className = "status-dot ready";
         statusText.textContent = `TuiML v${version} Ready in Browser`;
 
-        // Enable buttons
+        // Enable buttons & chat
         document.querySelectorAll("button").forEach(b => b.disabled = false);
+        agentInput.disabled = false;
+        btnAgentSend.disabled = false;
+        agentInput.placeholder = "Ask your in-browser AI Data Scientist (e.g. 'Train LogisticRegression on diabetes')...";
 
       } catch (err) {
         statusDot.className = "status-dot";
@@ -2038,6 +2041,20 @@ json.dumps({
           throw new Error("Pyodide WebAssembly runtime is not yet initialized.");
         }
 
+        // Clean up arguments for specific tools
+        args = { ...args };
+        if (toolName === "tuiml_describe") {
+          args.name = args.name || args.component || args.algorithm || "RandomForestClassifier";
+          delete args.component;
+          delete args.algorithm;
+        } else if (toolName === "tuiml_list") {
+          args.category = args.category || "algorithm";
+        } else if (toolName === "tuiml_train") {
+          if (args.algorithm_params && !args.params) {
+            args.params = args.algorithm_params;
+          }
+        }
+
         // Pass arguments directly into Python globals to avoid quote/escape collisions
         pyodideInstance.globals.set("_temp_tool_name", toolName);
         pyodideInstance.globals.set("_temp_tool_args_json", JSON.stringify(args || {}));
@@ -2081,10 +2098,109 @@ json.dumps(_res, default=_safe_json_default)
       }
     }
 
+    // Semantic Intent Parser: Maps user prompts directly to TuiML tools & arguments
+    function parseUserIntent(userText) {
+      const text = userText.toLowerCase();
+
+      // Algorithm Map (Natural language and class names)
+      const algoMap = [
+        { pattern: /\\b(random\\s*forest|rf|RandomForestClassifier)\\b/i, name: "RandomForestClassifier" },
+        { pattern: /\\b(decision\\s*tree|dt|c45|DecisionTreeClassifier)\\b/i, name: "DecisionTreeClassifier" },
+        { pattern: /\\b(naive\\s*bayes|nb|gaussian\\s*nb|NaiveBayesClassifier)\\b/i, name: "NaiveBayesClassifier" },
+        { pattern: /\\b(logistic\\s*regression|logistic|logit|lr|LogisticRegression)\\b/i, name: "LogisticRegression" },
+        { pattern: /\\b(knn|k-nearest|k\\s*nearest|kneighbors|KNearestNeighborsClassifier)\\b/i, name: "KNearestNeighborsClassifier" },
+        { pattern: /\\b(svm|svc|support\\s*vector|SVC)\\b/i, name: "SVC" },
+        { pattern: /\\b(xgboost|xgb|XGBoostClassifier)\\b/i, name: "XGBoostClassifier" },
+        { pattern: /\\b(lightgbm|lgb|LightGBMClassifier)\\b/i, name: "LightGBMClassifier" },
+        { pattern: /\\b(catboost|CatBoostClassifier)\\b/i, name: "CatBoostClassifier" },
+        { pattern: /\\b(kmeans|k-means|KMeansClusterer)\\b/i, name: "KMeansClusterer" },
+        { pattern: /\\b(dbscan|DBSCANClusterer)\\b/i, name: "DBSCANClusterer" },
+        { pattern: /\\b(linear\\s*regression|LinearRegression)\\b/i, name: "LinearRegression" }
+      ];
+
+      const matchedAlgos = [];
+      for (const item of algoMap) {
+        if (item.pattern.test(userText)) {
+          matchedAlgos.push(item.name);
+        }
+      }
+
+      // Dataset Detection
+      let matchedData = null;
+      if (uploadedCsvFileName && (text.includes("csv") || text.includes("upload") || text.includes(uploadedCsvFileName.toLowerCase()))) {
+        matchedData = uploadedCsvFileName;
+      } else if (text.includes("diabetes")) {
+        matchedData = "diabetes";
+      } else if (text.includes("breast") || text.includes("cancer")) {
+        matchedData = "breast-cancer";
+      } else if (text.includes("glass")) {
+        matchedData = "glass";
+      } else if (text.includes("wine")) {
+        matchedData = "wine";
+      } else if (text.includes("vote")) {
+        matchedData = "vote";
+      } else if (text.includes("ionosphere")) {
+        matchedData = "ionosphere";
+      } else if (text.includes("iris")) {
+        matchedData = "iris";
+      } else {
+        matchedData = uploadedCsvFileName ? uploadedCsvFileName : "iris";
+      }
+
+      // CV Folds Detection
+      let cv = 5;
+      const cvMatch = text.match(/(\\d+)[- ]?fold/i) || text.match(/cv\\s*[:=]?\\s*(\\d+)/i) || text.match(/(\\d+)\\s*cv/i);
+      if (cvMatch) {
+        cv = Math.min(Math.max(parseInt(cvMatch[1]), 2), 20);
+      }
+
+      // Intent Classification
+      const isBenchmark = /\\b(benchmark|compare|comparison|race|versus|vs|against)\\b/i.test(text);
+      const isDescribe = /\\b(describe|explain|details|info on|hyperparameters|parameters of)\\b/i.test(text) && !/\\b(train|fit|run)\\b/i.test(text);
+      const isList = /\\b(list|show all|what algorithms|which models|available models)\\b/i.test(text);
+      const isTrain = /\\b(train|fit|run|evaluate|build|model|classifier)\\b/i.test(text) || matchedAlgos.length > 0;
+
+      if (isBenchmark || matchedAlgos.length > 1) {
+        return {
+          tool: "tuiml_benchmark",
+          args: {
+            algorithms: matchedAlgos.length >= 2 ? matchedAlgos : ["RandomForestClassifier", "DecisionTreeClassifier", "NaiveBayesClassifier"],
+            data: matchedData,
+            cv: cv
+          }
+        };
+      } else if (isDescribe) {
+        return {
+          tool: "tuiml_describe",
+          args: {
+            name: matchedAlgos[0] || "RandomForestClassifier"
+          }
+        };
+      } else if (isList) {
+        return {
+          tool: "tuiml_list",
+          args: {
+            category: "algorithm"
+          }
+        };
+      } else if (isTrain || matchedAlgos.length === 1) {
+        return {
+          tool: "tuiml_train",
+          args: {
+            algorithm: matchedAlgos[0] || "RandomForestClassifier",
+            data: matchedData,
+            cv: cv
+          }
+        };
+      }
+
+      return null;
+    }
+
     // Agent Conversation Loop
     async function handleAgentUserMessage() {
       const userText = agentInput.value.trim();
-      if (!userText || !agentPipeline) return;
+      if (!userText) return;
 
       agentInput.value = "";
       agentInput.disabled = true;
@@ -2096,84 +2212,150 @@ json.dumps(_res, default=_safe_json_default)
       const thinkingMsg = appendChatMessage("assistant", "Thinking & planning ML workflow...");
 
       try {
-        const systemPrompt = `You are an Autonomous AI Data Scientist running client-side in the user's browser.
-You have direct in-memory access to TuiML machine learning tools via Pyodide:
-- tuiml_train(algorithm: str, data: str = "iris", cv: int = 5): Train classifiers (RandomForestClassifier, DecisionTreeClassifier, NaiveBayesClassifier, LogisticRegression, KNearestNeighborsClassifier, KMeansClusterer).
-- tuiml_benchmark(algorithms: list[str], data: str = "iris", cv: int = 5): Compare multiple models head-to-head.
-- tuiml_describe(component: str): Inspect hyperparameters and documentation.
-- tuiml_list(type: str = "classifier"): List available components.
+        const userIntent = parseUserIntent(userText);
+        let finalTool = null;
+        let finalArgs = null;
+        let llmExplanation = "";
 
-If the user asks you to train, evaluate, benchmark, or describe models, YOU MUST invoke a tool using this exact JSON format:
+        if (agentPipeline) {
+          const activeData = uploadedCsvFileName || "iris";
+          const systemPrompt = `You are an Autonomous AI Data Scientist in the browser with TuiML ML tools.
+Available tools:
+- tuiml_train: {"tool": "tuiml_train", "args": {"algorithm": "<Name>", "data": "<Dataset>", "cv": <int>}}
+- tuiml_benchmark: {"tool": "tuiml_benchmark", "args": {"algorithms": ["<Algo1>", "<Algo2>"], "data": "<Dataset>", "cv": <int>}}
+- tuiml_describe: {"tool": "tuiml_describe", "args": {"name": "<Name>"}}
+- tuiml_list: {"tool": "tuiml_list", "args": {"type": "classifier"}}
+
+Current dataset available: "${activeData}".
+Supported algorithms: RandomForestClassifier, DecisionTreeClassifier, NaiveBayesClassifier, LogisticRegression, KNearestNeighborsClassifier, SVC, KMeansClusterer.
+
+When the user asks you to train, benchmark, profile, describe, or evaluate models, output ONLY a JSON block with the tool and parameters requested by the user:
 \`\`\`json
-{"tool": "tuiml_train", "args": {"algorithm": "RandomForestClassifier", "data": "iris", "cv": 5}}
+{"tool": "tuiml_...", "args": {...}}
 \`\`\`
-Otherwise, respond helpfully and concisely.`;
+For normal questions, answer directly in concise English.`;
 
-        const messages = [
-          { role: "system", content: systemPrompt },
-          ...agentChatHistory.slice(-4)
-        ];
+          const messages = [
+            { role: "system", content: systemPrompt },
+            ...agentChatHistory.slice(-4)
+          ];
 
-        let prompt;
-        if (agentPipeline.tokenizer && agentPipeline.tokenizer.apply_chat_template) {
-          prompt = agentPipeline.tokenizer.apply_chat_template(messages, {
-            tokenize: false,
-            add_generation_prompt: true
+          let prompt;
+          if (agentPipeline.tokenizer && agentPipeline.tokenizer.apply_chat_template) {
+            prompt = agentPipeline.tokenizer.apply_chat_template(messages, {
+              tokenize: false,
+              add_generation_prompt: true
+            });
+          } else {
+            prompt = `${systemPrompt}\n\nUser: ${userText}\nAssistant:`;
+          }
+
+          const out = await agentPipeline(prompt, {
+            max_new_tokens: 256,
+            temperature: 0.1,
+            do_sample: false,
+            return_full_text: false
           });
+
+          let generatedText = out[0].generated_text || "";
+          if (prompt && typeof prompt === "string" && generatedText.startsWith(prompt)) {
+            generatedText = generatedText.slice(prompt.length);
+          }
+          generatedText = generatedText
+            .replace(/^<\|im_start\|>assistant\s*/i, "")
+            .replace(/^<start_of_turn>model\s*/i, "")
+            .replace(/^Assistant:\s*/i, "")
+            .replace(/<\|im_end\|>.*$/s, "")
+            .replace(/<end_of_turn>.*$/s, "")
+            .trim();
+
+          const jsonMatch = generatedText.match(/```json\s*(\{[\s\S]*?\})\s*```/) || generatedText.match(/(\{[\s\S]*?"tool"\s*:\s*"[\s\S]*?\})/);
+          let toolCall = null;
+          if (jsonMatch) {
+            try {
+              toolCall = JSON.parse(jsonMatch[1]);
+            } catch (e) {}
+          }
+
+          if (userIntent) {
+            finalTool = userIntent.tool;
+            finalArgs = userIntent.args;
+          } else if (toolCall) {
+            finalTool = toolCall.tool || toolCall.name;
+            finalArgs = toolCall.args || toolCall.arguments || {};
+          } else {
+            llmExplanation = generatedText;
+          }
         } else {
-          prompt = `${systemPrompt}\n\nUser: ${userText}\nAssistant:`;
+          // No LLM loaded yet: use Instant Intent Router
+          if (userIntent) {
+            finalTool = userIntent.tool;
+            finalArgs = userIntent.args;
+          } else {
+            llmExplanation = `I am your **In-Browser AI Data Scientist**!
+<br><br>
+You can ask me to:
+• **Train models**: <em>"Train LogisticRegression on diabetes with 10 folds"</em>
+• **Run benchmarks**: <em>"Benchmark Random Forest vs Decision Tree vs KNN on iris"</em>
+• **Describe models**: <em>"Describe SVC"</em>
+• **List algorithms**: <em>"List all classifiers"</em>
+<br><br>
+💡 <em>Tip: Load a WebGPU model above if you'd like to enable free-form conversational reasoning!</em>`;
+          }
         }
 
-        const out = await agentPipeline(prompt, {
-          max_new_tokens: 280,
-          temperature: 0.1,
-          do_sample: false
-        });
+        // Execute Tool if an action was identified
+        if (finalTool) {
+          thinkingMsg.querySelector(".chat-bubble").textContent = `Invoking TuiML MCP Tool: ${finalTool}...`;
+          const toolResult = dispatchTuimlMcpTool(finalTool, finalArgs);
 
-        let generatedText = out[0].generated_text;
-        if (generatedText.includes("Assistant:")) {
-          generatedText = generatedText.split("Assistant:").pop().trim();
-        } else if (generatedText.includes("<|im_start|>assistant")) {
-          generatedText = generatedText.split("<|im_start|>assistant").pop().replace("<|im_end|>", "").trim();
-        }
+          appendToolCard(finalTool, finalArgs, toolResult);
 
-        // Check if generated text contains tool call
-        const jsonMatch = generatedText.match(/```json\s*(\{[\s\S]*?\})\s*```/) || generatedText.match(/(\{[\s\S]*?"tool"\s*:\s*"[\s\S]*?\})/);
-
-        if (jsonMatch) {
-          try {
-            const toolCall = JSON.parse(jsonMatch[1]);
-            const toolName = toolCall.tool || toolCall.name;
-            const toolArgs = toolCall.args || toolCall.arguments || {};
-
-            thinkingMsg.querySelector(".chat-bubble").textContent = `Invoking TuiML tool: ${toolName}...`;
-            const toolResult = dispatchTuimlMcpTool(toolName, toolArgs);
-
-            appendToolCard(toolName, toolArgs, toolResult);
-
-            // Follow-up generation to explain result
-            let summaryText = "";
+          let summaryText = "";
+          if (finalTool === "tuiml_train") {
             if (toolResult.status === "success" && toolResult.metrics) {
               const acc = toolResult.metrics.cv_accuracy_score_mean ?? toolResult.metrics.accuracy_score ?? "N/A";
               const accStr = typeof acc === "number" ? (acc * 100).toFixed(2) + "%" : acc;
-              summaryText = `Successfully executed **${toolName}** on **${toolArgs.data || 'iris'}** in WebAssembly!\n• Mean CV Accuracy: **${accStr}**\n• Model: ${toolResult.algorithm || toolArgs.algorithm}`;
-            } else if (toolResult.results) {
-              summaryText = `Benchmark complete! Evaluated ${toolResult.results.length} models in client memory.`;
-            } else if (toolResult.status === "error") {
-              summaryText = `⚠️ **Tool Execution Error:** ${toolResult.error || "Unknown tool error"}`;
+              const f1 = toolResult.metrics.cv_f1_score_mean ?? toolResult.metrics.f1_score ?? null;
+              const f1Str = typeof f1 === "number" ? (f1 * 100).toFixed(2) + "%" : null;
+              summaryText = `✅ Trained **${finalArgs.algorithm}** on **${finalArgs.data || 'iris'}** in WebAssembly!
+<br>• <strong>Accuracy:</strong> ${accStr} (${finalArgs.cv || 5}-fold Cross-Validation)
+${f1Str ? `<br>• <strong>F1 Score:</strong> ${f1Str}` : ""}
+<br>• <strong>Target Execution:</strong> In-Browser Client WebAssembly`;
             } else {
-              summaryText = `TuiML tool completed: ${JSON.stringify(toolResult.metrics || toolResult.info || toolResult, null, 2)}`;
+              summaryText = `⚠️ **Training Notice:** ${toolResult.error || JSON.stringify(toolResult)}`;
             }
-
-            thinkingMsg.querySelector(".chat-bubble").innerHTML = summaryText;
-            agentChatHistory.push({ role: "assistant", content: summaryText });
-          } catch (pe) {
-            thinkingMsg.querySelector(".chat-bubble").textContent = generatedText;
-            agentChatHistory.push({ role: "assistant", content: generatedText });
+          } else if (finalTool === "tuiml_benchmark") {
+            if (toolResult.status === "success") {
+              const count = finalArgs.algorithms ? finalArgs.algorithms.length : "all";
+              summaryText = `⚡ **Benchmark Race Complete!** Evaluated **${count}** models on **${finalArgs.data}** with ${finalArgs.cv}-fold CV entirely in client memory. See the full scores in the card above.`;
+            } else {
+              summaryText = `⚠️ **Benchmark Notice:** ${toolResult.error || JSON.stringify(toolResult)}`;
+            }
+          } else if (finalTool === "tuiml_describe") {
+            if (toolResult.status === "success") {
+              summaryText = `🔍 **${toolResult.name}** (${toolResult.type})
+<br>${toolResult.description || ""}
+<br>• <strong>Tags:</strong> ${(toolResult.tags || []).join(", ") || "None"}
+<br>• <strong>Parameters:</strong> ${Object.keys(toolResult.parameters || {}).length} tunable hyperparameters.`;
+            } else {
+              summaryText = `⚠️ **Describe Notice:** ${toolResult.error || "Component not found."}`;
+            }
+          } else if (finalTool === "tuiml_list") {
+            if (toolResult.status === "success") {
+              const total = toolResult.total || toolResult.count || 50;
+              summaryText = `📋 **TuiML Ecosystem Components:**
+<br>Found **${total}** available algorithms and tools in the current WebAssembly build.`;
+            } else {
+              summaryText = `⚠️ **List Notice:** ${toolResult.error || JSON.stringify(toolResult)}`;
+            }
           }
+
+          thinkingMsg.querySelector(".chat-bubble").innerHTML = summaryText;
+          agentChatHistory.push({ role: "assistant", content: summaryText });
         } else {
-          thinkingMsg.querySelector(".chat-bubble").textContent = generatedText;
-          agentChatHistory.push({ role: "assistant", content: generatedText });
+          thinkingMsg.querySelector(".chat-bubble").innerHTML = llmExplanation;
+          agentChatHistory.push({ role: "assistant", content: llmExplanation });
         }
       } catch (err) {
         thinkingMsg.querySelector(".chat-bubble").textContent = "Generation error: " + err.message;
