@@ -2219,21 +2219,24 @@ json.dumps(_res, default=_safe_json_default)
 
         if (agentPipeline) {
           const activeData = uploadedCsvFileName || "iris";
-          const systemPrompt = `You are an Autonomous AI Data Scientist in the browser with TuiML ML tools.
-Available tools:
-- tuiml_train: {"tool": "tuiml_train", "args": {"algorithm": "<Name>", "data": "<Dataset>", "cv": <int>}}
-- tuiml_benchmark: {"tool": "tuiml_benchmark", "args": {"algorithms": ["<Algo1>", "<Algo2>"], "data": "<Dataset>", "cv": <int>}}
-- tuiml_describe: {"tool": "tuiml_describe", "args": {"name": "<Name>"}}
-- tuiml_list: {"tool": "tuiml_list", "args": {"type": "classifier"}}
+          const systemPrompt = `You are an Autonomous AI Data Scientist running in the user's browser with TuiML ML tools.
+
+Rules:
+1. For greetings (like "hello", "hi", "hey"), introductions, or general conversation, ALWAYS respond directly in natural, friendly English. Do NOT output JSON or call any tools.
+2. ONLY output a tool JSON block when the user specifically commands you to train, evaluate, benchmark, or describe a machine learning model.
+3. Tool call format:
+\`\`\`json
+{"tool": "<name>", "args": {<arguments>}}
+\`\`\`
+
+Available TuiML tools:
+- tuiml_train(algorithm, data, cv)
+- tuiml_benchmark(algorithms, data, cv)
+- tuiml_describe(name)
+- tuiml_list(category)
 
 Current dataset available: "${activeData}".
-Supported algorithms: RandomForestClassifier, DecisionTreeClassifier, NaiveBayesClassifier, LogisticRegression, KNearestNeighborsClassifier, SVC, KMeansClusterer.
-
-When the user asks you to train, benchmark, profile, describe, or evaluate models, output ONLY a JSON block with the tool and parameters requested by the user:
-\`\`\`json
-{"tool": "tuiml_...", "args": {...}}
-\`\`\`
-For normal questions, answer directly in concise English.`;
+Supported algorithms: RandomForestClassifier, DecisionTreeClassifier, NaiveBayesClassifier, LogisticRegression, KNearestNeighborsClassifier, SVC, KMeansClusterer.`;
 
           const messages = [
             { role: "system", content: systemPrompt },
@@ -2277,14 +2280,28 @@ For normal questions, answer directly in concise English.`;
             } catch (e) {}
           }
 
-          if (userIntent) {
+          const isGreeting = /^(hello|hi|hey|greetings|good\s*(morning|afternoon|evening)|sup|howdy|who are you|what can you do)[\s!.?]*$/i.test(userText.trim().toLowerCase());
+          const hasActionVerb = /\b(train|fit|run|evaluate|benchmark|compare|race|versus|vs|describe|explain|list|profile)\b/i.test(userText.toLowerCase());
+
+          if (isGreeting) {
+            // Conversational greeting: never execute a tool
+            llmExplanation = (toolCall || !generatedText) 
+              ? "Hello! I am your in-browser Autonomous AI Data Scientist powered by WebGPU and TuiML WebAssembly. How can I assist you with machine learning today? You can ask me to train, benchmark, evaluate, or describe any model on your data."
+              : generatedText;
+          } else if (userIntent) {
             finalTool = userIntent.tool;
             finalArgs = userIntent.args;
-          } else if (toolCall) {
+          } else if (toolCall && hasActionVerb) {
             finalTool = toolCall.tool || toolCall.name;
             finalArgs = toolCall.args || toolCall.arguments || {};
           } else {
-            llmExplanation = generatedText;
+            // Conversational or factual response
+            if (toolCall) {
+              // Strip hallucinated JSON if user didn't ask for training
+              llmExplanation = "I am ready to help you analyze your data! You can command me to train a model (e.g. *'Train LogisticRegression on diabetes'*), benchmark models, or inspect algorithms.";
+            } else {
+              llmExplanation = generatedText || "How can I help you with your machine learning workflow?";
+            }
           }
         } else {
           // No LLM loaded yet: use Instant Intent Router
