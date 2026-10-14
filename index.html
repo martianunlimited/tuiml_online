@@ -1834,9 +1834,11 @@ else:
       replPlots.style.display = "none";
       replLatency.textContent = "Executing...";
 
-      // Wrapped execution with stdout/stderr trap and matplotlib capture
+      // Safe execution using Pyodide globals, textwrap.dedent (handles implicit/arbitrary indentation), and exec()
+      pyodideInstance.globals.set("_repl_user_code", code);
+
       const pyWrapper = `
-import io, sys, time, json, base64
+import io, sys, time, json, base64, traceback, textwrap
 
 _stdout_trap = io.StringIO()
 _stderr_trap = io.StringIO()
@@ -1849,9 +1851,11 @@ _plots = []
 _t0 = time.perf_counter()
 
 try:
-${code.split("\\n").map(l => "    " + l).join("\\n")}
-except Exception as e:
-    import traceback
+    # textwrap.dedent removes any implicit outer indent level while preserving relative indents
+    _clean_code = textwrap.dedent(_repl_user_code)
+    _compiled = compile(_clean_code, "<repl>", "exec")
+    exec(_compiled, globals())
+except Exception:
     _err = traceback.format_exc()
 finally:
     _elapsed_ms = (time.perf_counter() - _t0) * 1000
