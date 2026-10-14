@@ -97,6 +97,7 @@
       letter-spacing: -0.02em;
       background: linear-gradient(135deg, #ffffff 40%, #cbd5e1 100%);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
@@ -172,6 +173,7 @@
       margin-bottom: 0.35rem;
       background: linear-gradient(135deg, #ffffff, #94a3b8);
       -webkit-background-clip: text;
+      background-clip: text;
       -webkit-text-fill-color: transparent;
     }
 
@@ -528,6 +530,18 @@
       outline: none;
       cursor: pointer;
       min-width: 260px;
+    }
+
+    .repl-preset-select optgroup {
+      background: #0f172a;
+      color: var(--accent-cyan);
+      font-weight: 600;
+    }
+
+    .repl-preset-select option {
+      background: #0f172a;
+      color: var(--text-main);
+      font-weight: normal;
     }
 
     .repl-preset-select:focus {
@@ -1094,12 +1108,21 @@ print(f"Mean accuracy: {scores.mean():.4f} (+/- {scores.std():.4f})")
             </div>
             
             <div class="agent-config-row">
-              <select class="repl-preset-select" id="agent-model-select" style="min-width: 320px;">
-                <option value="onnx-community/Qwen2.5-0.5B-Instruct">Qwen2.5-0.5B-Instruct (q4f16, ~350MB • Fastest)</option>
-                <option value="onnx-community/Qwen2.5-1.5B-Instruct">Qwen2.5-1.5B-Instruct (q4f16, ~950MB • High Accuracy)</option>
-                <option value="onnx-community/gemma-2-2b-it">Google Gemma-2-2B-IT (q4f16, ~1.5GB • Google Gemma)</option>
-                <option value="onnx-community/Qwen2.5-Coder-1.5B-Instruct">Qwen2.5-Coder-1.5B-Instruct (q4f16, ~950MB • Code Specialist)</option>
-                <option value="onnx-community/SmolLM2-360M-Instruct">SmolLM2-360M-Instruct (q4, ~220MB • Ultra-Lightweight)</option>
+              <select class="repl-preset-select" id="agent-model-select" style="min-width: 340px;">
+                <optgroup label="Liquid AI — LFM2 Family">
+                  <option value="onnx-community/LFM2-350M-ONNX" selected>LFM2-350M-ONNX (q4f16, ~250MB • Ultra-Fast)</option>
+                  <option value="onnx-community/LFM2-700M-ONNX">LFM2-700M-ONNX (q4f16, ~490MB • Balanced)</option>
+                  <option value="onnx-community/LFM2-1.2B-ONNX">LFM2-1.2B-ONNX (q4f16, ~850MB • High Capability)</option>
+                  <option value="onnx-community/LFM2-2.6B-ONNX">LFM2-2.6B-ONNX (q4f16, ~1.7GB • Flagship Hybrid)</option>
+                </optgroup>
+                <optgroup label="Qwen Series">
+                  <option value="onnx-community/Qwen3-1.7B-ONNX">Qwen3-1.7B-ONNX (q4f16, ~1.1GB • Qwen3 Next-Gen)</option>
+                  <option value="raphaelmansuy/qwen3.5-0.8b-onnx-webgpu">qwen3.5-0.8b-onnx-webgpu (q4f16, ~660MB • WebGPU)</option>
+                  <option value="nlothian/Qwen3.5-4B-ZEOS-OPT_Q4F16">Qwen3.5-4B-ZEOS-OPT_Q4F16 (q4f16, ~2.5GB • ZEOS WebGPU)</option>
+                </optgroup>
+                <optgroup label="SmolLM2 Series">
+                  <option value="mainbrains/SmolLM2-1.7B-Instruct">SmolLM2-1.7B-Instruct (q4f16, ~1.0GB • Instruct)</option>
+                </optgroup>
               </select>
 
               <button class="btn-primary" id="btn-load-agent-model" style="padding: 0.45rem 1.15rem;">
@@ -1969,14 +1992,16 @@ json.dumps({
 
       btnLoad.disabled = true;
       progressPanel.style.display = "block";
+      progressFill.style.width = "0%";
+      progressFill.style.background = "linear-gradient(90deg, var(--primary), var(--accent-cyan))";
       progressLabel.textContent = `Loading Transformers.js runtime for ${modelId}...`;
       log(`Booting local LLM ${modelId} via ${hasWebGPU ? "WebGPU" : "WASM CPU"}...`);
 
       try {
-        const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.1");
+        const { pipeline, env } = await import("https://cdn.jsdelivr.net/npm/@huggingface/transformers");
         env.allowLocalModels = false;
 
-        agentPipeline = await pipeline("text-generation", modelId, {
+        const modelOptions = {
           device: hasWebGPU ? "webgpu" : "wasm",
           dtype: hasWebGPU ? "q4f16" : "q4",
           progress_callback: (p) => {
@@ -1990,7 +2015,17 @@ json.dumps({
               progressLabel.textContent = `Downloaded ${p.file}. Compiling WebGPU kernels...`;
             }
           }
-        });
+        };
+
+        // Model-specific overrides for custom ONNX layouts and precisions
+        if (modelId === "nlothian/Qwen3.5-4B-ZEOS-OPT_Q4F16") {
+          modelOptions.dtype = "q4f16";
+          modelOptions.model_file_name = "decoder_zeos";
+        } else if (modelId === "raphaelmansuy/qwen3.5-0.8b-onnx-webgpu") {
+          modelOptions.dtype = "q4f16";
+        }
+
+        agentPipeline = await pipeline("text-generation", modelId, modelOptions);
 
         agentModelName = modelId.split("/").pop();
         progressLabel.textContent = `✅ ${modelId} active in browser (${hasWebGPU ? "WebGPU" : "WASM"})`;
@@ -2009,7 +2044,19 @@ json.dumps({
         log("Failed to load in-browser LLM: " + err.message);
         progressLabel.textContent = "Error: " + err.message;
         btnLoad.disabled = false;
+        btnLoad.textContent = "Load Model into WebGPU";
+        btnLoad.className = "btn-primary";
       }
+    });
+
+    // Reset load button when user changes selection so they can load another model
+    document.getElementById("agent-model-select").addEventListener("change", () => {
+      const btnLoad = document.getElementById("btn-load-agent-model");
+      btnLoad.disabled = false;
+      btnLoad.textContent = "Load Model into WebGPU";
+      btnLoad.className = "btn-primary";
+      const progressPanel = document.getElementById("agent-progress-panel");
+      progressPanel.style.display = "none";
     });
 
     function appendChatMessage(role, text) {
@@ -2181,6 +2228,8 @@ json.dumps(_res, default=_safe_json_default)
       let text = (out[0].generated_text || "")
         .replace(/<\|im_end\|>[\s\S]*$/, "")
         .replace(/<end_of_turn>[\s\S]*$/, "")
+        .replace(/<\|endoftext\|>[\s\S]*$/, "")
+        .replace(/<\|eot_id\|>[\s\S]*$/, "")
         .trim();
       const ms = performance.now() - t0;
       log(`[LLM] ${agentModelName} generated ${text.length} chars in ${(ms / 1000).toFixed(2)}s. Raw output: ${JSON.stringify(text)}`);

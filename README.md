@@ -37,11 +37,11 @@
 │       WebGPU / Transformers.js│             Pyodide / WASM             │
 │                               │                                        │
 │   Quantized Local LLM         │        TuiML ML Engine & MCP Tools     │
-│   • Qwen2.5-0.5B-Instruct     │        • tuiml_train                   │
-│   • Qwen2.5-1.5B-Instruct     │        • tuiml_predict                 │
-│   • Google Gemma-2-2B-IT      │        • tuiml_benchmark               │
-│   • Qwen2.5-Coder-1.5B        │        • tuiml_describe                │
-│   • SmolLM2-360M-Instruct     │        • tuiml_plot                    │
+│   • LFM2 (350M, 700M, 1.2B,   │        • tuiml_train                   │
+│     2.6B ONNX Hybrid Models)  │        • tuiml_predict                 │
+│   • Qwen3-1.7B-ONNX           │        • tuiml_benchmark               │
+│   • Qwen3.5 (0.8B & 4B ZEOS)  │        • tuiml_describe                │
+│   • SmolLM2-1.7B-Instruct     │        • tuiml_plot                    │
 ├───────────────────────────────┴────────────────────────────────────────┤
 │                       IN-MEMORY MCP ROUTER                             │
 │     JavaScript bridges JSON-RPC tool calls directly into Pyodide       │
@@ -54,7 +54,7 @@
 ## ✨ Features
 
 - **🤖 In-Browser Autonomous AI Data Scientist**:
-  - Load quantized Q4/q4f16 LLMs (`Qwen2.5`, `Gemma-2-2B`, `SmolLM2`) into client VRAM via WebGPU.
+  - Load quantized Q4/q4f16 LLMs (`LFM2`, `Qwen3`, `Qwen3.5`, `SmolLM2`) into client VRAM via WebGPU.
   - Automatically queries available TuiML MCP tools to train models, run benchmarks, and explain findings.
 - **🌲 Pure-WASM Machine Learning (TuiML)**:
   - Decision Trees, Random Forests, Naive Bayes, Logistic Regression, KNN, and KMeans clustering.
